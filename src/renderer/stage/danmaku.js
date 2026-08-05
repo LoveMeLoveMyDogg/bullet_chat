@@ -32,7 +32,7 @@ function show(text, meta = {}) {
   el.style.fontSize = (meta.source === 'local' ? 26 : 30 + Math.floor(Math.random() * 10)) + 'px';
   if (!config.animationsEnabled) el.style.left = '20px';
   lane.el.appendChild(el);
-  const duration = 8000;
+  const duration = 9000;
   setTimeout(() => { el.remove(); lane.busy = false; }, duration);
 }
 
@@ -40,7 +40,7 @@ window.api.onStageConfig((cfg) => {
   config = { ...config, ...cfg };
   buildLanes();
 });
-window.api.getStageConfig().then((cfg) => { config = { ...config, ...cfg }; buildLanes(); });
+window.api.getStageConfig().then((cfg) => { config = { ...config, ...cfg }; buildLanes(); }).catch(() => {});
 window.api.onDanmaku(({ text, meta }) => show(text, meta));
 
 // 开发辅助：看不到弹幕时在控制台手动试 window.show('测试弹幕')
