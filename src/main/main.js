@@ -25,6 +25,7 @@ let paused = false;
 let demoHandle = null;
 let screenWatcher = null;
 let processor = null;
+let screenPaused = false; // 托盘"暂停屏幕识别"开关
 
 function notify(title, body) {
   try { new Notification({ title, body }).show(); } catch { /* 忽略 */ }
@@ -34,6 +35,7 @@ function notify(title, body) {
 // 若声明在 whenReady 回调内，模块级 applyConfig 按词法作用域找不到它 → ReferenceError
 function applyScreenWatcher() {
   if (screenWatcher) screenWatcher.stop();
+  if (screenPaused) return; // 托盘暂停中：不启动也不弹首启提示
   if (!config.visionModel.enabled) return;
   if (!config.visionModel.baseUrl || !config.visionModel.apiKey || !config.visionModel.model) {
     // 未配置完整：普通提示，不进入错误状态（文件弹幕照常）
@@ -45,9 +47,16 @@ function applyScreenWatcher() {
     getMasks: () => config.monitor.masks,
     onEntry: (entry) => brain?.pushEntry(entry),
     onError: (err) => reporter?.reportError('screen', err),
+    onRecovered: () => reporter?.reportRecovered?.('screen'),
     processor,
   });
   screenWatcher.start();
+  // 首次开启屏幕识别的隐私提示（只提示一次，确认后写入配置）
+  if (!config.monitor.privacyAcknowledged) {
+    notify('BulletChat', '屏幕识别已开启：截图仅发送给你配置的视觉 API 地址，可在设置中绘制隐私遮罩');
+    config.monitor.privacyAcknowledged = true;
+    saveConfig(config);
+  }
 }
 
 function applyConfig(saved, { silent = false } = {}) {
@@ -62,6 +71,7 @@ function applyConfig(saved, { silent = false } = {}) {
     filter: makeNoiseFilter(config.monitor.noiseRules),
     onEvent: (entry) => brain?.pushEntry(entry),
     onError: (err) => reporter?.reportError('watch', err),
+    onRecovered: () => reporter?.reportRecovered?.('watch'),
   });
   watcher.start();
   // 同步演出层配置
@@ -74,6 +84,8 @@ function applyConfig(saved, { silent = false } = {}) {
 }
 
 const gotLock = app.requestSingleInstanceLock();
+// Windows toast 通知需要 AppUserModelId，必须在 ready 前设置
+app.setAppUserModelId('com.bulletchat.app');
 if (!gotLock) {
   // 第二实例：直接退出（app.exit 在 ready 事件前也生效，quit() 在 Windows 上可能无效）
   app.exit(0);
@@ -127,7 +139,7 @@ if (!gotLock) {
 
     // 托盘对象必须持有全局引用，否则会被 GC 回收导致图标消失
     global.__tray = createTray({
-      getState: () => ({ paused, localMode: brain.getStatus().localMode, demo: !!demoHandle }),
+      getState: () => ({ paused, localMode: brain.getStatus().localMode, demo: !!demoHandle, screenPaused }),
       onQuit: () => app.quit(),
       onOpenSettings: () => {
         const settingsWin = createSettingsWindow({ preloadPath: PRELOAD });
@@ -156,6 +168,12 @@ if (!gotLock) {
           demoHandle = startDemo({ onEntry: (e) => brain?.pushEntry(e) });
           notify('BulletChat', '演示模式已开启（模拟事件流）');
         }
+      },
+      onToggleScreenPause: () => {
+        screenPaused = !screenPaused;
+        if (screenPaused) screenWatcher?.stop();
+        else applyScreenWatcher();
+        notify('BulletChat', screenPaused ? '屏幕识别已暂停' : '屏幕识别已恢复');
       },
     });
   });
