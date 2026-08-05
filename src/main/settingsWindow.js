@@ -11,7 +11,7 @@ function createSettingsWindow({ preloadPath }) {
     height: 640,
     title: 'BulletChat 设置',
     resizable: true,
-    webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false },
+    webPreferences: { preload: preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: false },
   });
   win.loadFile(path.join(__dirname, '..', 'renderer', 'settings', 'settings.html'));
   win.on('closed', () => { win = null; });

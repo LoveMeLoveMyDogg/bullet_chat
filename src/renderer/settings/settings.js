@@ -15,9 +15,17 @@ async function load() {
   $('vision-interval').value = config.visionModel.captureIntervalSec;
   $('dm-interval').value = config.danmaku.minIntervalSec;
   $('dm-max').value = config.danmaku.maxConcurrent;
-  $('dm-anim').checked = config.danmaku.animationsEnabled;
   $('dm-local').checked = config.danmaku.localMode;
   $('dm-styles').value = config.danmaku.styles.join(',');
+  // 外观
+  $('dm-fs-min').value = config.danmaku.fontSizeMin;
+  $('dm-fs-max').value = config.danmaku.fontSizeMax;
+  $('dm-colors').value = config.danmaku.colors.join(',');
+  $('dm-speed').value = config.danmaku.speed;
+  $('dm-speed-val').textContent = config.danmaku.speed + 'x';
+  for (const cb of $('dm-anims').querySelectorAll('input[type=checkbox]')) {
+    cb.checked = config.danmaku.animations.includes(cb.value);
+  }
   $('sys-autostart').checked = config.system.autostart;
   maskState.masks = config.monitor.masks || [];
 
@@ -143,6 +151,11 @@ $('btn-test-vision').onclick = async () => {
   btn.disabled = false;
 };
 
+// 速度滑块实时显示当前倍速
+$('dm-speed').addEventListener('input', () => {
+  $('dm-speed-val').textContent = $('dm-speed').value + 'x';
+});
+
 $('btn-save').onclick = async () => {
   config.textModel.baseUrl = $('text-baseUrl').value.trim();
   config.textModel.apiKey = $('text-apiKey').value.trim();
@@ -155,9 +168,14 @@ $('btn-save').onclick = async () => {
   const iv = Number($('dm-interval').value);
   config.danmaku.minIntervalSec = Number.isNaN(iv) ? 10 : Math.max(0, iv); // 0 是合法值（不间隔），仅非数字回退 10
   config.danmaku.maxConcurrent = Math.min(12, Math.max(1, Number($('dm-max').value) || 6));
-  config.danmaku.animationsEnabled = $('dm-anim').checked;
   config.danmaku.localMode = $('dm-local').checked;
   config.danmaku.styles = $('dm-styles').value.split(',').map((s) => s.trim()).filter(Boolean);
+  // 外观：字号范围（min<=max 校正）、颜色列表、倍速、动画勾选
+  config.danmaku.fontSizeMin = Math.max(0, Math.min(100, Number($('dm-fs-min').value) || 30));
+  config.danmaku.fontSizeMax = Math.max(config.danmaku.fontSizeMin, Math.min(100, Number($('dm-fs-max').value) || 39));
+  config.danmaku.colors = $('dm-colors').value.split(',').map((s) => s.trim()).filter(Boolean);
+  config.danmaku.speed = Number($('dm-speed').value) || 1;
+  config.danmaku.animations = Array.from($('dm-anims').querySelectorAll('input[type=checkbox]:checked')).map((cb) => cb.value);
   config.system.autostart = $('sys-autostart').checked;
   config.monitor.masks = maskState.masks;
   await window.settings.saveConfig(config);

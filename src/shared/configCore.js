@@ -5,7 +5,7 @@ const KNOWN_KEYS = {
   textModel: { baseUrl: 'https://api.deepseek.com', apiKey: '', model: 'deepseek-chat' },
   visionModel: { enabled: false, baseUrl: '', apiKey: '', model: '', captureIntervalSec: 4 },
   monitor: { drives: [], noiseRules: [], masks: [], privacyAcknowledged: false },
-  danmaku: { minIntervalSec: 10, batchIntervalMs: 5000, maxConcurrent: 6, styles: [], animationsEnabled: true, localMode: false },
+  danmaku: { minIntervalSec: 10, batchIntervalMs: 5000, maxConcurrent: 6, styles: [], fontSizeMin: 30, fontSizeMax: 39, colors: [], speed: 1, animations: ['fly'], localMode: false },
   system: { autostart: false },
 };
 
