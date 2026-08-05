@@ -13,7 +13,7 @@ window.processor.onProcess(async (payload) => {
     for (const m of masks || []) {
       ctx.fillRect(m.x * cv.width, m.y * cv.height, m.w * cv.width, m.h * cv.height);
     }
-    window.processor.resolveProcess(id, cv.toDataURL('image/jpeg', 0.8));
+    window.processor.resolveProcess(id, cv.toDataURL('image/jpeg', 0.7));
   } catch (err) {
     window.processor.errorProcess(id, String(err));
   }

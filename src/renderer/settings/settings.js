@@ -14,8 +14,11 @@ async function load() {
   $('vision-model').value = config.visionModel.model;
   $('vision-interval').value = config.visionModel.captureIntervalSec;
   $('dm-interval').value = config.danmaku.minIntervalSec;
+  $('dm-vision-interval').value = config.danmaku.minIntervalVisionSec;
+  $('dm-event-age').value = config.danmaku.maxEventAgeSec;
   $('dm-max').value = config.danmaku.maxConcurrent;
   $('dm-local').checked = config.danmaku.localMode;
+  $('dm-read-content').checked = config.danmaku.readFileContent;
   $('dm-styles').value = config.danmaku.styles.join(',');
   // 外观
   $('dm-fs-min').value = config.danmaku.fontSizeMin;
@@ -129,7 +132,7 @@ function formVisionModel() {
     baseUrl: $('vision-baseUrl').value.trim(),
     apiKey: $('vision-apiKey').value.trim(),
     model: $('vision-model').value.trim(),
-    captureIntervalSec: Math.max(2, Number($('vision-interval').value) || 4),
+    captureIntervalSec: Math.max(2, Number($('vision-interval').value) || 8),
   };
 }
 
@@ -164,11 +167,16 @@ $('btn-save').onclick = async () => {
   config.visionModel.baseUrl = $('vision-baseUrl').value.trim();
   config.visionModel.apiKey = $('vision-apiKey').value.trim();
   config.visionModel.model = $('vision-model').value.trim();
-  config.visionModel.captureIntervalSec = Math.max(2, Number($('vision-interval').value) || 4);
+  config.visionModel.captureIntervalSec = Math.max(2, Number($('vision-interval').value) || 8);
   const iv = Number($('dm-interval').value);
   config.danmaku.minIntervalSec = Number.isNaN(iv) ? 10 : Math.max(0, iv); // 0 是合法值（不间隔），仅非数字回退 10
+  const viv = Number($('dm-vision-interval').value);
+  config.danmaku.minIntervalVisionSec = Number.isNaN(viv) ? 10 : Math.max(0, viv); // 视觉独立限速
+  const ev = Number($('dm-event-age').value);
+  config.danmaku.maxEventAgeSec = Number.isNaN(ev) ? 120 : Math.max(0, ev); // 0 = 不限时
   config.danmaku.maxConcurrent = Math.min(12, Math.max(1, Number($('dm-max').value) || 6));
   config.danmaku.localMode = $('dm-local').checked;
+  config.danmaku.readFileContent = $('dm-read-content').checked;
   config.danmaku.styles = $('dm-styles').value.split(',').map((s) => s.trim()).filter(Boolean);
   // 外观：字号范围（min<=max 校正）、颜色列表、倍速、动画勾选
   config.danmaku.fontSizeMin = Math.max(0, Math.min(100, Number($('dm-fs-min').value) || 30));
@@ -189,4 +197,44 @@ window.settings.onStatus((s) => {
   bar.textContent = `状态：${s.text}`;
 });
 
-load();
+// 请求日志：发送给文字/视觉模型的内容、回复与截图
+async function renderRequestLogs() {
+  const logs = await window.settings.getRequestLogs();
+  const box = $('req-log');
+  box.innerHTML = '';
+  if (!logs.length) {
+    box.textContent = '（暂无请求记录，有 AI 请求后显示）';
+    return;
+  }
+  for (const l of [...logs].reverse()) {
+    const row = document.createElement('div');
+    row.className = 'req-item ' + (l.error ? 'req-err' : '');
+    const head = document.createElement('div');
+    const time = new Date(l.ts).toLocaleTimeString();
+    const channel = l.channel === 'vision' ? '视觉' : '文字';
+    head.textContent = `[${time}] [${channel}] ${l.error ? '失败：' + l.error : ''}`;
+    row.appendChild(head);
+    const body = document.createElement('div');
+    body.className = 'req-body';
+    body.textContent = `发送：${l.input}`;
+    row.appendChild(body);
+    if (l.reply) {
+      const rep = document.createElement('div');
+      rep.className = 'req-body';
+      rep.textContent = `回复：${l.reply}`;
+      row.appendChild(rep);
+    }
+    if (l.image) {
+      const img = document.createElement('img');
+      img.className = 'req-shot';
+      img.src = 'file://' + l.image;
+      img.title = l.image;
+      row.appendChild(img);
+    }
+    box.appendChild(row);
+  }
+}
+
+$('btn-refresh-log').onclick = renderRequestLogs;
+$('btn-open-log').onclick = () => window.settings.openLogDir();
+load().then(renderRequestLogs);

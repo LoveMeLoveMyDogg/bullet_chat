@@ -10,6 +10,11 @@
     <div id="status-bar">状态：加载中…</div>
   </header>
 
+  <div class="privacy-note">
+    ⚠️ 隐私提示：接入云端 AI 后，文件操作事件（含读取的内容片段）与屏幕截图，将发送至你填写的接口地址。
+    如介意，可自行部署本地大模型（Ollama / LM Studio 等支持 OpenAI 兼容协议的服务），填入本地接口地址即可，数据全程不出本机。
+  </div>
+
   <section>
     <h2>文字模型（文件弹幕）</h2>
     <label>接口地址 <input id="text-baseUrl" placeholder="https://api.deepseek.com" /></label>
@@ -41,9 +46,12 @@
 
   <section>
     <h2>弹幕</h2>
-    <label>最小间隔（秒） <input id="dm-interval" type="number" min="0" max="300" /></label>
+    <label>文字弹幕最小间隔（秒） <input id="dm-interval" type="number" min="0" max="300" /></label>
+    <label>视觉弹幕最小间隔（秒，防高频烧额度） <input id="dm-vision-interval" type="number" min="0" max="300" /></label>
+    <label>事件时效（秒，超过不播报，0=不限） <input id="dm-event-age" type="number" min="0" max="3600" /></label>
     <label>同屏上限 <input id="dm-max" type="number" min="1" max="12" /></label>
     <label><input id="dm-local" type="checkbox" /> 本地模式（不调 API，用内置模板）</label>
+    <label><input id="dm-read-content" type="checkbox" /> 读取文件内容片段（发送给 AI，可生成更懂内容的弹幕；仅读小文本文件）</label>
     <label>风格池（逗号分隔） <input id="dm-styles" /></label>
     <h3>外观</h3>
     <label>最小字号 <input id="dm-fs-min" type="number" min="0" max="100" /></label>
@@ -62,6 +70,14 @@
   <section>
     <h2>系统</h2>
     <label><input id="sys-autostart" type="checkbox" /> 开机自启</label>
+  </section>
+
+  <section>
+    <h2>日志（发送给 AI 的请求）</h2>
+    <p class="hint">显示最近发送给文字/视觉模型的请求与回复；视觉请求附截图（已应用隐私遮罩）。也可直接打开日志目录查看完整文件。</p>
+    <button id="btn-open-log">打开日志目录</button>
+    <button id="btn-refresh-log">刷新</button>
+    <div id="req-log" class="req-log"></div>
   </section>
 
   <footer>

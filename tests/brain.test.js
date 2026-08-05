@@ -1,5 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const { Brain, typeKey } = require('../src/shared/brain');
 const { defaultConfig } = require('../src/shared/configCore');
 const templates = require('../src/shared/templates');
@@ -22,6 +25,7 @@ function makeEnv(overrides = {}) {
   const cfg = defaultConfig();
   cfg.danmaku.batchIntervalMs = 20;
   cfg.danmaku.minIntervalSec = 0;
+  cfg.danmaku.minIntervalVisionSec = 0; // 现有视觉测试不受默认 10s 限速影响
   const brain = new Brain({
     config: cfg, generator, reporter, templates,
     onDanmaku: (text, meta) => danmaku.push({ text, meta }),
@@ -210,5 +214,94 @@ test('混合批次：屏幕条目与文件条目拆批，视觉用真实截图',
   assert.equal(visionImage, 'data:image/jpeg;base64,REALSCREEN'); // 不再是 undefined
   assert.ok(!lastTextUser.includes('屏幕'), '文字批次不应包含屏幕条目描述');
   assert.equal(generator.textCalls, 1);
+  brain.stop();
+});
+
+const { readFileSnippet, describeEntry } = require('../src/shared/brain');
+
+test('readFileSnippet 读取小文本文件内容片段', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-content-'));
+  const f = path.join(dir, 'note.txt');
+  fs.writeFileSync(f, '今天写了一段很长的会议纪要，内容是关于季度汇报的。');
+  assert.ok(readFileSnippet(f).includes('会议纪要'));
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('readFileSnippet 跳过二进制与大文件', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-content-'));
+  // 二进制（含 NUL）
+  const bin = path.join(dir, 'a.bin');
+  fs.writeFileSync(bin, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1, 2, 3]));
+  assert.equal(readFileSnippet(bin), '');
+  // 超过 50KB
+  const big = path.join(dir, 'big.txt');
+  fs.writeFileSync(big, 'x'.repeat(60 * 1024));
+  assert.equal(readFileSnippet(big), '');
+  // 不存在的文件
+  assert.equal(readFileSnippet(path.join(dir, 'nope.txt')), '');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('describeEntry 内容开关与事件类型控制', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-content-'));
+  const f = path.join(dir, 'a.txt');
+  fs.writeFileSync(f, '秘密配方：三勺糖');
+  const entry = { source: 'file', type: 'change', name: 'a.txt', path: f };
+  // 开：附内容片段
+  const withContent = describeEntry(entry, true);
+  assert.ok(withContent.includes('秘密配方'));
+  // 关：不附
+  assert.equal(describeEntry(entry, false), '用户修改了「a.txt」');
+  // 删除事件不读内容（文件已不存在）
+  const deleted = { source: 'file', type: 'delete', name: 'a.txt', path: f };
+  assert.equal(describeEntry(deleted, true), '用户删除了「a.txt」');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('时间窗：超过 maxEventAgeSec 的积压事件被丢弃', async () => {
+  let fakeNow = 1000000;
+  const { brain, danmaku, generator } = makeEnv({ clock: () => fakeNow });
+  brain.pushEntry(entry('create')); // ts = 1000000
+  fakeNow += 3 * 60 * 1000;         // 3 分钟后（超过默认 120s 窗口）
+  brain.pushEntry(entry('create')); // ts = 1180000，窗口内
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(generator.textCalls, 1, '旧事件应被丢弃，只发送新事件');
+  assert.equal(danmaku.length, 2);
+  brain.stop();
+});
+
+test('时间窗：maxEventAgeSec=0 时旧事件不过滤', async () => {
+  let fakeNow = 1000000;
+  let sentUser = '';
+  const gen = {
+    chatCompletion: async ({ user }) => { sentUser = user; return '["a"]'; },
+    visionCompletion: async () => '["b"]',
+  };
+  const { brain, generator } = makeEnv({ generator: gen, clock: () => fakeNow });
+  brain.refreshConfig(defaultConfig()); // 默认 maxEventAgeSec=120——先设 0
+  brain.config.danmaku.maxEventAgeSec = 0;
+  brain.pushEntry(entry('create'));
+  fakeNow += 10 * 60 * 1000; // 10 分钟后的事件
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 40));
+  assert.ok(sentUser.split('\n').length >= 2, '两条事件都应发送（不过滤）');
+  brain.stop();
+});
+
+test('通道限速隔离：视觉被限速不影响文字，文字被限速不影响视觉', async () => {
+  const { brain, danmaku, generator } = makeEnv();
+  // 视觉限速 1 小时（默认 10s 的极端化），文字不限速
+  brain.config.danmaku.minIntervalVisionSec = 3600;
+  brain.config.danmaku.minIntervalSec = 0;
+  // 先发一条视觉（占用视觉限速窗口）
+  brain.pushEntry(entry('screen', { source: 'screen', type: 'screen', name: '屏幕变化', imageDataUrl: 'data:image/jpeg;base64,x' }));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(generator.visionCalls, 1);
+  // 视觉限速窗口内：再发视觉 → 丢弃；同时发文字 → 正常发送（通道隔离）
+  brain.pushEntry(entry('screen', { source: 'screen', type: 'screen', name: '屏幕变化', imageDataUrl: 'data:image/jpeg;base64,x' }));
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(generator.visionCalls, 1, '视觉应被限速丢弃');
+  assert.equal(generator.textCalls, 1, '文字不应受视觉限速影响');
   brain.stop();
 });

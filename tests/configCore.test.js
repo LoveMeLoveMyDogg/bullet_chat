@@ -18,6 +18,7 @@ test('defaultConfig 返回独立副本', () => {
   assert.equal(defaultConfig().textModel.baseUrl, 'https://api.deepseek.com');
   assert.equal(defaultConfig().textModel.model, 'deepseek-chat');
   assert.equal(defaultConfig().visionModel.enabled, false);
+  assert.equal(defaultConfig().visionModel.captureIntervalSec, 8);
   assert.equal(defaultConfig().danmaku.minIntervalSec, 10);
 });
 
@@ -28,6 +29,8 @@ test('弹幕外观默认值', () => {
   assert.deepEqual(d.colors, []);
   assert.equal(d.speed, 1);
   assert.deepEqual(d.animations, ['fly']); // 默认只保留横飘
+  assert.equal(d.readFileContent, true); // 默认读取文件内容片段
+  assert.equal(d.minIntervalVisionSec, 10); // 视觉独立限速默认 10s
   assert.equal(d.animationsEnabled, undefined); // 旧键已移除
 });
 

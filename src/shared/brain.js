@@ -2,10 +2,42 @@ const { formatEventDescription } = require('./noiseFilter');
 const { pickStyles, buildSystemPrompt } = require('./styles');
 const { templateFor, fillTemplate } = require('./templates');
 const { parseDanmakuJson, RED_SQUARE_DATA_URL } = require('../main/generator');
+const fs = require('node:fs');
 
 const BATCH_SIZE = 10;
 const COALESCE_MS = 2000;
 const RETRY_MS = 60000;
+const MAX_READ_BYTES = 50 * 1024;   // 超过此大小不读内容（大文件/构建产物）
+const MAX_CONTENT_CHARS = 200;      // 内容片段最长字符数
+const BINARY_PROBE = 4096;          // 二进制检测采样长度
+
+// 读取文本文件内容片段（供 AI 生成"懂内容"的弹幕）。
+// 只读小文本文件：超限/二进制/读取失败一律返回空串（保持事件描述不因内容读取而失败）
+function readFileSnippet(filePath) {
+  try {
+    const st = fs.statSync(filePath);
+    if (!st.isFile() || st.size > MAX_READ_BYTES) return '';
+    const fd = fs.openSync(filePath, 'r');
+    const buf = Buffer.alloc(Math.min(st.size, BINARY_PROBE));
+    fs.readSync(fd, buf, 0, buf.length, 0);
+    fs.closeSync(fd);
+    // 二进制检测：采样区含 NUL 或大量非 UTF-8 字节则跳过
+    if (buf.includes(0)) return '';
+    let nonText = 0;
+    for (const b of buf) if (b < 9 || (b > 13 && b < 32)) nonText++;
+    if (nonText > buf.length / 10) return '';
+    return fs.readFileSync(filePath, 'utf8').replace(/\s+/g, ' ').trim().slice(0, MAX_CONTENT_CHARS);
+  } catch { return ''; }
+}
+
+// 事件描述 + 可选内容片段：create/change 且开关开启且可读到文本 → 附「内容：…」
+function describeEntry(entry, readContent) {
+  const base = formatEventDescription(entry);
+  if (!readContent || entry.source === 'screen' || !entry.path) return base;
+  if (entry.type !== 'create' && entry.type !== 'change') return base;
+  const snippet = readFileSnippet(entry.path);
+  return snippet ? `${base}（内容：${snippet}）` : base;
+}
 
 function typeKey(entry) {
   if (entry.source === 'screen') return 'screen';
@@ -22,18 +54,20 @@ function currentStyles(brain) {
 }
 
 class Brain {
-  constructor({ config, generator, templates, reporter, clock = Date.now, rng = Math.random, onDanmaku, onStatus }) {
+  constructor({ config, generator, templates, reporter, logger = null, clock = Date.now, rng = Math.random, onDanmaku, onStatus }) {
     this.config = config;
     this.generator = generator;
     this.templates = templates;
     this.reporter = reporter;
+    this.logger = logger; // 请求日志（发送给 AI 的内容/截图/回复），可选
     this.clock = clock;
     this.rng = rng;
     this.onDanmaku = onDanmaku;
     this.onStatus = onStatus;
     this.queue = [];
     this.changeSeen = new Map(); // path -> lastChangeTime
-    this.lastEmit = 0;
+    this.lastTextEmit = 0;   // 文字弹幕最后发送时间（本地模式与文字 AI 共用）
+    this.lastVisionEmit = 0; // 视觉弹幕最后发送时间（独立限速，避免视觉高频烧额度）
     this.batchTimer = null;
     this.retryTimer = null;
     this.lastVisionImage = null; // 最近一次视觉请求的截图，重试探测用它而非空图
@@ -68,6 +102,7 @@ class Brain {
       this.emitLocal(entry);
       return;
     }
+    entry.ts = this.clock(); // 记录到达时间，供时间窗过滤（积压的旧事件不再播报）
     this.queue.push(entry);
     if (this.queue.length >= BATCH_SIZE) this.flushNow();
   }
@@ -89,20 +124,27 @@ class Brain {
   flushNow() {
     if (this.queue.length === 0) return;
     const now = this.clock();
-    if (now - this.lastEmit < this.config.danmaku.minIntervalSec * 1000) {
-      this.queue.length = 0; // 限速未到时间：清空保持弹幕新鲜
-      return;
+    // 时间窗过滤：只播报最近 maxEventAgeSec 秒内的改动（弹幕是直播体验，队列积压的旧事件丢弃）
+    const maxAgeMs = (this.config.danmaku.maxEventAgeSec || 0) * 1000;
+    if (maxAgeMs > 0) {
+      this.queue = this.queue.filter((e) => now - (e.ts || now) <= maxAgeMs);
+      if (this.queue.length === 0) return;
     }
     const batch = this.queue.splice(0, BATCH_SIZE);
     // 按来源拆批：屏幕条目走视觉、文件条目走文字，互不混串
     const fileEntries = batch.filter((e) => e.source !== 'screen');
     const screenEntries = batch.filter((e) => e.source === 'screen');
-    if (!this.state.error.text && fileEntries.length) this.generateText(fileEntries);
-    if (!this.state.error.vision && screenEntries.length) this.generateVision(screenEntries);
+    // 文字/视觉各自限速：一通道被限速不影响另一通道（视觉默认 10 秒，防高频烧额度）
+    if (fileEntries.length && !this.state.error.text && now - this.lastTextEmit >= this.config.danmaku.minIntervalSec * 1000) {
+      this.generateText(fileEntries);
+    }
+    if (screenEntries.length && !this.state.error.vision && now - this.lastVisionEmit >= this.config.danmaku.minIntervalVisionSec * 1000) {
+      this.generateVision(screenEntries);
+    }
   }
 
   async generateText(batch) {
-    const user = batch.map(formatEventDescription).join('\n');
+    const user = batch.map((e) => describeEntry(e, this.config.danmaku.readFileContent)).join('\n');
     const system = buildSystemPrompt(currentStyles(this));
     try {
       const raw = await this.generator.chatCompletion({
@@ -111,8 +153,10 @@ class Brain {
         model: this.config.textModel.model,
         system, user,
       });
+      this.logger?.logRequest({ channel: 'text', input: user, reply: raw });
       this.emitParsed(raw, 'text');
     } catch (err) {
+      this.logger?.logRequest({ channel: 'text', input: user, error: err.message });
       this.fail('text', err);
     }
   }
@@ -129,8 +173,10 @@ class Brain {
         system,
         imageDataUrl: entry.imageDataUrl,
       });
+      this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', reply: raw, imageDataUrl: entry.imageDataUrl });
       this.emitParsed(raw, 'vision');
     } catch (err) {
+      this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', imageDataUrl: entry.imageDataUrl, error: err.message });
       this.fail('vision', err);
     }
   }
@@ -138,7 +184,8 @@ class Brain {
   emitParsed(raw, src) {
     const lines = parseDanmakuJson(raw);
     if (lines.length === 0) return;
-    this.lastEmit = this.clock();
+    if (src === 'vision') this.lastVisionEmit = this.clock();
+    else this.lastTextEmit = this.clock();
     for (const line of lines) {
       // meta.source 接口约定为 'ai'|'local'
       this.onDanmaku(line, { source: 'ai' });
@@ -148,8 +195,8 @@ class Brain {
   }
 
   emitLocal(entry) {
-    if (this.clock() - this.lastEmit < this.config.danmaku.minIntervalSec * 1000) return;
-    this.lastEmit = this.clock();
+    if (this.clock() - this.lastTextEmit < this.config.danmaku.minIntervalSec * 1000) return;
+    this.lastTextEmit = this.clock();
     const tpl = this.templates.templateFor(typeKey(entry), this.rng);
     const text = '【本地】' + this.templates.fillTemplate(tpl, entry);
     this.onDanmaku(text, { source: 'local' });
@@ -227,4 +274,4 @@ class Brain {
   }
 }
 
-module.exports = { Brain, typeKey };
+module.exports = { Brain, typeKey, readFileSnippet, describeEntry };

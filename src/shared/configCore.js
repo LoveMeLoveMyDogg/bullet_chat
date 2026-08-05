@@ -3,9 +3,9 @@ const path = require('node:path');
 
 const KNOWN_KEYS = {
   textModel: { baseUrl: 'https://api.deepseek.com', apiKey: '', model: 'deepseek-chat' },
-  visionModel: { enabled: false, baseUrl: '', apiKey: '', model: '', captureIntervalSec: 4 },
+  visionModel: { enabled: false, baseUrl: '', apiKey: '', model: '', captureIntervalSec: 8 },
   monitor: { drives: [], noiseRules: [], masks: [], privacyAcknowledged: false },
-  danmaku: { minIntervalSec: 10, batchIntervalMs: 5000, maxConcurrent: 6, styles: [], fontSizeMin: 30, fontSizeMax: 39, colors: [], speed: 1, animations: ['fly'], localMode: false },
+  danmaku: { minIntervalSec: 10, minIntervalVisionSec: 10, batchIntervalMs: 5000, maxConcurrent: 6, styles: [], fontSizeMin: 30, fontSizeMax: 39, colors: [], speed: 1, animations: ['fly'], localMode: false, readFileContent: true, maxEventAgeSec: 120 },
   system: { autostart: false },
 };
 
