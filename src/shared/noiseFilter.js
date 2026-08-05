@@ -11,8 +11,23 @@ const DEFAULT_NOISE_SUBSTRINGS = [
   'desktop.ini',
 ];
 
+// macOS 专属噪音路径（Windows 规则在 macOS 路径上匹配不到；路径统一转反斜杠后按子串匹配）
+function platformNoiseRules() {
+  if (process.platform === 'darwin') {
+    return [
+      '.DS_Store',
+      '\\Library\\',        // ~/Library（缓存/应用数据），也覆盖 /System/Library 等
+      '\\.Trash',           // 废纸篓（Finder 删除会在其中产生"新建"，过滤避免重复弹幕）
+      '\\.fseventsd',
+      '\\.Spotlight-V100',
+      '$TemporaryItems',
+    ];
+  }
+  return [];
+}
+
 function makeNoiseFilter(extraRules = []) {
-  const rules = DEFAULT_NOISE_SUBSTRINGS.concat(extraRules);
+  const rules = DEFAULT_NOISE_SUBSTRINGS.concat(platformNoiseRules(), extraRules);
   return function isNoise(entry) {
     const p = (entry.path || '').replace(/\//g, '\\');
     const n = entry.name || '';
@@ -49,4 +64,4 @@ function formatEventDescription(entry) {
   }
 }
 
-module.exports = { DEFAULT_NOISE_SUBSTRINGS, makeNoiseFilter, formatEventDescription };
+module.exports = { DEFAULT_NOISE_SUBSTRINGS, platformNoiseRules, makeNoiseFilter, formatEventDescription };

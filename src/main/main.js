@@ -1,8 +1,8 @@
-const { app, ipcMain, Notification, BrowserWindow } = require('electron');
+const { app, ipcMain, Notification, BrowserWindow, shell } = require('electron');
 const path = require('node:path');
 const { createTray } = require('./tray');
 const { loadConfig, saveConfig } = require('./config');
-const { FileWatcher, listFixedDrives } = require('./fileWatcher');
+const { FileWatcher, listWatchRoots } = require('./fileWatcher');
 const { Brain } = require('../shared/brain');
 const { makeNoiseFilter } = require('../shared/noiseFilter');
 const templates = require('../shared/templates');
@@ -13,6 +13,7 @@ const { createSettingsWindow, registerSettingsIpc } = require('./settingsWindow'
 const { ScreenWatcher } = require('./screenWatcher');
 const { ImageProcessor } = require('./imageProcessor');
 const { startDemo, stopDemo } = require('./demoMode');
+const { RequestLogger } = require('./requestLogger');
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'preload.js');
 
@@ -67,7 +68,7 @@ function applyConfig(saved, { silent = false } = {}) {
   // 重启文件监控（盘符可能变化）
   if (watcher) watcher.stop();
   watcher = new FileWatcher({
-    drives: config.monitor.drives.length ? config.monitor.drives : listFixedDrives(),
+    drives: config.monitor.drives.length ? config.monitor.drives : listWatchRoots(),
     filter: makeNoiseFilter(config.monitor.noiseRules),
     onEvent: (entry) => brain?.pushEntry(entry),
     onError: (err) => reporter?.reportError('watch', err),
@@ -84,8 +85,8 @@ function applyConfig(saved, { silent = false } = {}) {
 }
 
 const gotLock = app.requestSingleInstanceLock();
-// Windows toast 通知需要 AppUserModelId，必须在 ready 前设置
-app.setAppUserModelId('com.bulletchat.app');
+// Windows toast 通知需要 AppUserModelId，必须在 ready 前设置（Windows-only API）
+if (process.platform === 'win32') app.setAppUserModelId('com.bulletchat.app');
 if (!gotLock) {
   // 第二实例：直接退出（app.exit 在 ready 事件前也生效，quit() 在 Windows 上可能无效）
   app.exit(0);
@@ -106,11 +107,15 @@ if (!gotLock) {
       onStatus: broadcastStatus,
     });
 
+    // 请求日志：发送给文字/视觉模型的输入与回复 + 截图存档（设置页可查看）
+    const logger = new RequestLogger({ logDir: path.join(app.getPath('userData'), 'logs') });
+
     brain = new Brain({
       config,
       generator: require('./generator'),
       templates,
       reporter,
+      logger,
       onDanmaku: (text, meta) => stage?.send(text, meta),
     });
 
@@ -132,6 +137,12 @@ if (!gotLock) {
     ipcMain.handle('settings:testText', (_e, cfg) => testTextConnection(cfg || config.textModel));
     ipcMain.handle('settings:testVision', (_e, cfg) => testVisionConnection(cfg || config.visionModel));
     ipcMain.handle('settings:getStatus', () => reporter.getStatus());
+    ipcMain.handle('settings:getRequestLogs', () => logger.getLogs());
+    ipcMain.handle('settings:openLogDir', () => {
+      const dir = path.join(app.getPath('userData'), 'logs');
+      shell.openPath(dir);
+      return dir;
+    });
     ipcMain.handle('stage:getConfig', () => config.danmaku);
 
     applyConfig(config, { silent: true }); // 初次装配（含自启与监控启动），不弹通知

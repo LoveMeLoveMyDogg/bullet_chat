@@ -4,7 +4,7 @@ const DIFF_THRESHOLD = 0.002;   // 画面变化率阈值
 const SAMPLE_STEP = 64;         // 每 64 像素采样一次
 const PREVIEW_W = 480;
 const PREVIEW_H = 270;
-const FULL_W = 1280;
+const FULL_W = 1024; // 变化检测后的大图宽度（视觉识别足够，体积小上传快）
 
 function pixelDiffRatio(a, b) {
   if (!a || !b || a.length !== b.length) return 1;
@@ -44,6 +44,15 @@ class ScreenWatcher {
     this.last.clear();
   }
 
+  // 截屏源不可用：macOS 通常是屏幕录制权限未授权，给出可操作的引导
+  failPermission() {
+    const hint = process.platform === 'darwin'
+      ? '屏幕录制权限未授权：请在 系统设置 → 隐私与安全性 → 屏幕录制 中开启后重启应用'
+      : '未检测到可用屏幕源';
+    this.onError?.(new Error(hint));
+    this.hadError = true;
+  }
+
   async tick() {
     if (this.ticking) return;
     this.ticking = true;
@@ -53,7 +62,17 @@ class ScreenWatcher {
         types: ['screen'],
         thumbnailSize: { width: PREVIEW_W, height: PREVIEW_H },
       });
+      if (sources.length === 0) {
+        this.failPermission();
+        return;
+      }
       for (const src of sources) {
+        // macOS 屏幕录制权限未授权时 thumbnail 为空（0×0），给用户可操作的引导
+        const size = src.thumbnail.getSize();
+        if (!size.width || !size.height) {
+          this.failPermission();
+          return;
+        }
         const bits = src.thumbnail.toBitmap();
         const prev = this.last.get(src.display_id);
         if (!prev) {

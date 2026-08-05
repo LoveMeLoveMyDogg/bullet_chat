@@ -2,6 +2,10 @@
 
 像直播观众一样盯着你的电脑：文件操作、屏幕变化都会飘出 AI 生成的弹幕吐槽。
 
+支持 Windows 与 macOS。macOS 首次使用屏幕识别，需在 系统设置 → 隐私与安全性 → 屏幕录制 中授权（文件弹幕不受影响）。
+
+接口兼容：标准 OpenAI `chat/completions` 端点直接填地址即可；仅支持 Responses API 的端点（如火山方舟 coding plan，填 `https://ark.cn-beijing.volces.com/api/coding/v3`）会自动探测并回退兼容。
+
 ## 运行
 
 ```bash
