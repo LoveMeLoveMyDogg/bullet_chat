@@ -1,7 +1,7 @@
 const { formatEventDescription } = require('./noiseFilter');
 const { pickStyles, buildSystemPrompt } = require('./styles');
 const { templateFor, fillTemplate } = require('./templates');
-const { parseDanmakuJson } = require('../main/generator');
+const { parseDanmakuJson, RED_SQUARE_DATA_URL } = require('../main/generator');
 
 const BATCH_SIZE = 10;
 const COALESCE_MS = 2000;
@@ -36,7 +36,8 @@ class Brain {
     this.lastEmit = 0;
     this.batchTimer = null;
     this.retryTimer = null;
-    this.state = { mode: 'idle', paused: false, localMode: !!config.danmaku.localMode, error: null };
+    this.lastVisionImage = null; // 最近一次视觉请求的截图，重试探测用它而非空图
+    this.state = { mode: 'idle', paused: false, localMode: !!config.danmaku.localMode, error: { text: null, vision: null } };
   }
 
   start() {
@@ -87,14 +88,16 @@ class Brain {
 
   flushNow() {
     if (this.queue.length === 0) return;
-    if (this.state.error) { this.queue.length = 0; return; } // 出错期间不生成，事件丢弃
     const now = this.clock();
     if (now - this.lastEmit < this.config.danmaku.minIntervalSec * 1000) {
       this.queue.length = 0; // 限速未到时间：清空保持弹幕新鲜
       return;
     }
     const batch = this.queue.splice(0, BATCH_SIZE);
-    if (batch[0] && batch[0].source === 'screen') this.generateVision(batch);
+    // 错误状态按通道隔离：只有该来源出错才丢弃本批，另一通道照常工作
+    const src = batch[0] && batch[0].source === 'screen' ? 'vision' : 'text';
+    if (this.state.error[src]) { this.queue.length = 0; return; }
+    if (src === 'vision') this.generateVision(batch);
     else this.generateText(batch);
   }
 
@@ -108,7 +111,7 @@ class Brain {
         model: this.config.textModel.model,
         system, user,
       });
-      this.emitParsed(raw);
+      this.emitParsed(raw, 'text');
     } catch (err) {
       this.fail('text', err);
     }
@@ -116,6 +119,7 @@ class Brain {
 
   async generateVision(batch) {
     const entry = batch[batch.length - 1];
+    this.lastVisionImage = entry.imageDataUrl;
     const system = buildSystemPrompt(currentStyles(this));
     try {
       const raw = await this.generator.visionCompletion({
@@ -125,13 +129,13 @@ class Brain {
         system,
         imageDataUrl: entry.imageDataUrl,
       });
-      this.emitParsed(raw);
+      this.emitParsed(raw, 'vision');
     } catch (err) {
       this.fail('vision', err);
     }
   }
 
-  emitParsed(raw) {
+  emitParsed(raw, src) {
     const lines = parseDanmakuJson(raw);
     if (lines.length === 0) return;
     this.lastEmit = this.clock();
@@ -139,7 +143,7 @@ class Brain {
       // meta.source 接口约定为 'ai'|'local'
       this.onDanmaku(line, { source: 'ai' });
     }
-    if (this.state.error) this.clearError();
+    if (this.state.error[src]) this.clearError(src);
     this.emitStatus();
   }
 
@@ -152,14 +156,14 @@ class Brain {
   }
 
   fail(source, err) {
-    this.state.error = { source, message: err.message || String(err), at: this.clock() };
+    this.state.error[source] = { source, message: err.message || String(err), at: this.clock() };
     this.reporter?.reportError?.(source, err);
     this.emitStatus();
   }
 
-  clearError() {
-    const src = this.state.error ? this.state.error.source : 'text';
-    this.state.error = null;
+  clearError(src) {
+    if (!this.state.error[src]) return; // 该来源本无错误：不通知恢复
+    this.state.error[src] = null;
     this.reporter?.reportRecovered?.(src);
     this.emitStatus();
   }
@@ -172,7 +176,11 @@ class Brain {
 
   pause() { this.state.paused = true; this.emitStatus(); }
   resume() { this.state.paused = false; this.emitStatus(); }
-  getStatus() { return { ...this.state, mode: this.state.mode }; }
+  getStatus() {
+    // 对外保持旧形状：null 或 { source, message, at }
+    const error = this.state.error.text || this.state.error.vision || null;
+    return { ...this.state, mode: this.state.mode, error };
+  }
 
   refreshConfig(config) {
     this.config = config;
@@ -180,34 +188,38 @@ class Brain {
   }
 
   retryNow() {
-    if (!this.state.error) return;
-    const err = this.state.error;
-    this.state.error = null; // 临时清除，让 retry 请求走通
-    const attempt = err.source === 'vision'
-      ? this.generator.visionCompletion({
-          baseUrl: this.config.visionModel.baseUrl,
-          apiKey: this.config.visionModel.apiKey,
-          model: this.config.visionModel.model,
-          system: buildSystemPrompt(['正经夸夸']),
-          imageDataUrl: '',
+    for (const src of ['text', 'vision']) {
+      const err = this.state.error[src];
+      if (!err) continue;
+      // 视觉探测用最近一次真实截图（或红方块占位），空图片 URL 多数端点直接 400
+      const attempt = src === 'vision'
+        ? this.generator.visionCompletion({
+            baseUrl: this.config.visionModel.baseUrl,
+            apiKey: this.config.visionModel.apiKey,
+            model: this.config.visionModel.model,
+            system: buildSystemPrompt(['正经夸夸']),
+            imageDataUrl: this.lastVisionImage || RED_SQUARE_DATA_URL,
+          })
+        : this.generator.chatCompletion({
+            baseUrl: this.config.textModel.baseUrl,
+            apiKey: this.config.textModel.apiKey,
+            model: this.config.textModel.model,
+            system: '你是连接测试助手',
+            user: '只回复一个字：通',
+          });
+      attempt
+        .then(() => {
+          // 重试窗口期内若该来源已发生新的失败（错误对象被替换），不误报恢复
+          if (this.state.error[src] === err) this.clearError(src);
         })
-      : this.generator.chatCompletion({
-          baseUrl: this.config.textModel.baseUrl,
-          apiKey: this.config.textModel.apiKey,
-          model: this.config.textModel.model,
-          system: '你是连接测试助手',
-          user: '只回复一个字：通',
+        .catch(() => {
+          // 仍失败，恢复该来源错误状态等下一次重试；不触碰其他来源的状态
+          if (this.state.error[src] === err) {
+            this.state.error[src] = err;
+            this.emitStatus();
+          }
         });
-    attempt
-      .then(() => {
-        // 重试窗口期内若已发生新的失败（state.error 被重新置位），不误报恢复
-        if (!this.state.error) this.reporter?.reportRecovered?.(err.source);
-        this.emitStatus();
-      })
-      .catch(() => {
-        this.state.error = err; // 仍失败，恢复错误状态等下一次重试
-        this.emitStatus();
-      });
+    }
   }
 
   emitStatus() {

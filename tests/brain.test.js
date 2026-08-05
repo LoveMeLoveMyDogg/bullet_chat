@@ -157,3 +157,41 @@ test('错误后成功批次恢复并报告正确来源', async () => {
   assert.ok(reporter.recovered.includes('text'));
   brain.stop();
 });
+
+test('视觉错误不影响文字弹幕', async () => {
+  const { brain, danmaku, generator } = makeEnv();
+  generator.visionCompletion = async () => { throw new Error('视觉挂了'); };
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
+  brain.flushNow();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(brain.getStatus().error);
+  assert.equal(brain.getStatus().error.source, 'vision');
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(generator.textCalls, 1); // 文字通道照常生成
+  assert.ok(danmaku.length > 0); // 产出弹幕
+  assert.equal(brain.getStatus().error.source, 'vision'); // 视觉错误保持
+  brain.stop();
+});
+
+test('视觉重试用真实图片', async () => {
+  const { brain, generator } = makeEnv();
+  let calls = 0;
+  let seenImage = '';
+  generator.visionCompletion = async ({ imageDataUrl }) => {
+    calls++;
+    if (calls === 1) throw new Error('第一次失败');
+    seenImage = imageDataUrl;
+    return '["重试成功"]';
+  };
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
+  brain.flushNow();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(brain.getStatus().error);
+  assert.equal(brain.getStatus().error.source, 'vision');
+  brain.retryNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(seenImage, 'data:image/jpeg;base64,TEST'); // 重试探测用真实截图而非空图
+  assert.equal(brain.getStatus().error, null);
+  brain.stop();
+});

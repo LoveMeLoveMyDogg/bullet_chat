@@ -22,6 +22,7 @@ class ErrorReporter {
     this.logDir = logDir;
     this.lastNotified = new Map();
     this.errors = [];
+    this.sourceStates = {}; // 来源 -> 'ok' | 'err'（text/vision/watch/screen）
     this.status = { state: 'running', text: '运行中' };
   }
 
@@ -36,13 +37,36 @@ class ErrorReporter {
       this.lastNotified.set(key, now);
       this.notify('BulletChat 弹幕已暂停', `${sourceLabel(source)}出错：${message}`);
     }
-    this.setStatus({ state: 'error', text: `${sourceLabel(source)}出错：${message}` });
+    this.sourceStates[source] = 'err';
+    this.refreshStatus();
   }
 
   reportRecovered(source) {
+    this.sourceStates[source] = 'ok';
     this.log(`[INFO] [${source}] 已恢复`);
-    this.notify('BulletChat 弹幕已恢复', `${sourceLabel(source)}恢复正常`);
-    this.setStatus({ state: 'running', text: '运行中' });
+    const stillErr = Object.values(this.sourceStates).some((v) => v === 'err');
+    if (!stillErr) {
+      // 所有来源都正常才发"已恢复"通知并回到 running
+      this.notify('BulletChat 弹幕已恢复', `${sourceLabel(source)}恢复正常`);
+      this.setStatus({ state: 'running', text: '运行中' });
+    } else {
+      // 仍有其他来源出错：只更新状态文本（去掉已恢复来源），不发恢复通知
+      this.refreshStatus();
+    }
+  }
+
+  // 聚合状态：任一来源 'err' → error，text 列出所有错误来源与最新错误消息
+  refreshStatus() {
+    const errSources = Object.keys(this.sourceStates).filter((s) => this.sourceStates[s] === 'err');
+    if (errSources.length === 0) {
+      this.setStatus({ state: 'running', text: '运行中' });
+      return;
+    }
+    const latest = [...this.errors].reverse().find((e) => errSources.includes(e.source));
+    this.setStatus({
+      state: 'error',
+      text: `${errSources.map(sourceLabel).join('、')}出错：${latest?.message || '未知错误'}`,
+    });
   }
 
   setStatus(status) {
