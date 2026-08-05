@@ -2908,12 +2908,8 @@ window.processor.onProcess(async (payload) => {
 const { ScreenWatcher } = require('./screenWatcher');
 const { ImageProcessor } = require('./imageProcessor');
 
-// whenReady 内、brain 创建后：
-const processor = new ImageProcessor({ preloadPath: PRELOAD });
-processor.init().catch((err) => reporter.reportError('screen', err));
-ipcMain.on('process:resolve', (_e, { id, dataUrl }) => processor.resolve(id, dataUrl));
-ipcMain.on('process:error', (_e, { id, message }) => processor.reject(id, new Error(message)));
-
+// 模块作用域（与 watcher/stage 并列，applyConfig 定义之前）——applyConfig 会调用它，
+// 若声明在 whenReady 回调内会因作用域不可见而抛 ReferenceError
 let screenWatcher = null;
 function applyScreenWatcher() {
   if (screenWatcher) screenWatcher.stop();
@@ -2932,9 +2928,16 @@ function applyScreenWatcher() {
   });
   screenWatcher.start();
 }
-applyScreenWatcher();
-// 在 applyConfig 末尾追加 applyScreenWatcher();
 ```
+
+whenReady 内、brain 创建后追加（processor 初始化与 IPC 监听注册一次）：
+```js
+const processor = new ImageProcessor({ preloadPath: PRELOAD });
+processor.init().catch((err) => reporter.reportError('screen', err));
+ipcMain.on('process:resolve', (_e, { id, dataUrl }) => processor.resolve(id, dataUrl));
+ipcMain.on('process:error', (_e, { id, message }) => processor.reject(id, new Error(message)));
+```
+（`processor` 变量在 whenReady 内创建后，模块级 applyScreenWatcher 引用它——把 `let processor = null;` 声明在模块级、whenReady 内赋值，保证引用合法。）
 
 - [ ] **Step 7: 手动验证（需要视觉模型 key）**
 
