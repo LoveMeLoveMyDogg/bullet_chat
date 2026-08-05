@@ -1421,6 +1421,7 @@ test('攒批：10 条事件触发一次生成，弹幕≤3 条', async () => {
   assert.equal(generator.textCalls, 1);
   assert.equal(danmaku.length, 2);
   assert.equal(danmaku[0].meta.source, 'ai');
+  brain.stop();
 });
 
 test('限速：minIntervalSec 内第二次 flush 被丢弃', async () => {
@@ -1440,7 +1441,7 @@ test('限速：minIntervalSec 内第二次 flush 被丢弃', async () => {
 test('change 事件 2 秒内同路径合并为一条描述', async () => {
   const { brain, generator } = makeEnv();
   let lastUser = '';
-  generator.chatCompletion = async ({ user }) => { lastUser = user; return '["x"]'; };
+  generator.chatCompletion = async ({ user }) => { generator.textCalls++; lastUser = user; return '["x"]'; };
   for (let i = 0; i < 3; i++) brain.pushEntry(entry('change'));
   brain.flushNow();
   await new Promise((r) => setTimeout(r, 20));
@@ -1615,7 +1616,7 @@ class Brain {
         model: this.config.textModel.model,
         system, user,
       });
-      this.emitParsed(raw, 'text');
+      this.emitParsed(raw, 'ai');
     } catch (err) {
       this.fail('text', err);
     }
@@ -1632,85 +1633,10 @@ class Brain {
         system,
         imageDataUrl: entry.imageDataUrl,
       });
-      this.emitParsed(raw, 'vision');
+      this.emitParsed(raw, 'ai');
     } catch (err) {
       this.fail('vision', err);
     }
-  }
-  constructor({ config, generator, templates, reporter, clock = Date.now, rng = Math.random, onDanmaku, onStatus }) {
-    this.config = config;
-    this.generator = generator;
-    this.templates = templates;
-    this.reporter = reporter;
-    this.clock = clock;
-    this.rng = rng;
-    this.onDanmaku = onDanmaku;
-    this.onStatus = onStatus;
-    this.queue = [];
-    this.changeSeen = new Map();
-    this.lastEmit = 0;
-    this.batchTimer = null;
-    this.retryTimer = null;
-    this.state = { mode: 'idle', paused: false, localMode: !!config.danmaku.localMode, error: null };
-  }
-
-  start() {
-    this.state.mode = 'running';
-    this.scheduleBatch();
-    this.scheduleRetry();
-    this.emitStatus();
-  }
-
-  stop() {
-    clearTimeout(this.batchTimer);
-    clearTimeout(this.retryTimer);
-    this.state.mode = 'idle';
-  }
-
-  pushEntry(entry) {
-    if (this.state.paused) return;
-    if (entry.type === 'change') {
-      const now = this.clock();
-      const last = this.changeSeen.get(entry.path);
-      if (last !== undefined && now - last < COALESCE_MS) {
-        this.changeSeen.set(entry.path, now);
-        return;
-      }
-      this.changeSeen.set(entry.path, now);
-    }
-    if (this.state.localMode) {
-      this.emitLocal(entry);
-      return;
-    }
-    this.queue.push(entry);
-    if (this.queue.length >= BATCH_SIZE) this.flushNow();
-  }
-
-  scheduleBatch() {
-    this.batchTimer = setTimeout(() => {
-      this.flushNow();
-      this.scheduleBatch();
-    }, this.config.danmaku.batchIntervalMs);
-  }
-
-  scheduleRetry() {
-    this.retryTimer = setTimeout(() => {
-      this.retryNow();
-      this.scheduleRetry();
-    }, RETRY_MS);
-  }
-
-  flushNow() {
-    if (this.queue.length === 0) return;
-    if (this.state.error) { this.queue.length = 0; return; }
-    const now = this.clock();
-    if (now - this.lastEmit < this.config.danmaku.minIntervalSec * 1000) {
-      this.queue.length = 0;
-      return;
-    }
-    const batch = this.queue.splice(0, BATCH_SIZE);
-    if (batch[0] && batch[0].source === 'screen') this.generateVision(batch);
-    else this.generateText(batch);
   }
 
   emitParsed(raw, source) {

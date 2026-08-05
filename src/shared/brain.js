@@ -108,7 +108,7 @@ class Brain {
         model: this.config.textModel.model,
         system, user,
       });
-      this.emitParsed(raw, 'text');
+      this.emitParsed(raw, 'ai');
     } catch (err) {
       this.fail('text', err);
     }
@@ -125,7 +125,7 @@ class Brain {
         system,
         imageDataUrl: entry.imageDataUrl,
       });
-      this.emitParsed(raw, 'vision');
+      this.emitParsed(raw, 'ai');
     } catch (err) {
       this.fail('vision', err);
     }
@@ -136,8 +136,8 @@ class Brain {
     if (lines.length === 0) return;
     this.lastEmit = this.clock();
     for (const line of lines) {
-      // meta.source 接口约定为 'ai'|'local'（本函数 source 参数为内部 'text'|'vision'）
-      this.onDanmaku(line, { source: 'ai' });
+      // meta.source 接口约定为 'ai'|'local'（source 参数在调用处已统一传 'ai'）
+      this.onDanmaku(line, { source });
     }
     if (this.state.error) this.clearError();
     else this.reporter?.reportRecovered?.(source);
