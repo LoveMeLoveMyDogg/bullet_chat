@@ -227,7 +227,8 @@ async function renderRequestLogs() {
     if (l.image) {
       const img = document.createElement('img');
       img.className = 'req-shot';
-      img.src = 'file://' + l.image;
+      // 跨平台 file:// URL：Windows 盘符（C:\ → /C:/）+ 统一正斜杠；macOS 绝对路径原样
+      img.src = 'file://' + l.image.replace(/\\/g, '/').replace(/^([A-Za-z]):/, '/$1:');
       img.title = l.image;
       row.appendChild(img);
     }
