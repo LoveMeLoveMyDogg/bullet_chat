@@ -108,7 +108,7 @@ class Brain {
         model: this.config.textModel.model,
         system, user,
       });
-      this.emitParsed(raw, 'ai');
+      this.emitParsed(raw);
     } catch (err) {
       this.fail('text', err);
     }
@@ -125,22 +125,21 @@ class Brain {
         system,
         imageDataUrl: entry.imageDataUrl,
       });
-      this.emitParsed(raw, 'ai');
+      this.emitParsed(raw);
     } catch (err) {
       this.fail('vision', err);
     }
   }
 
-  emitParsed(raw, source) {
+  emitParsed(raw) {
     const lines = parseDanmakuJson(raw);
     if (lines.length === 0) return;
     this.lastEmit = this.clock();
     for (const line of lines) {
-      // meta.source 接口约定为 'ai'|'local'（source 参数在调用处已统一传 'ai'）
-      this.onDanmaku(line, { source });
+      // meta.source 接口约定为 'ai'|'local'
+      this.onDanmaku(line, { source: 'ai' });
     }
     if (this.state.error) this.clearError();
-    else this.reporter?.reportRecovered?.(source);
     this.emitStatus();
   }
 
@@ -159,8 +158,9 @@ class Brain {
   }
 
   clearError() {
+    const src = this.state.error ? this.state.error.source : 'text';
     this.state.error = null;
-    this.reporter?.reportRecovered?.('text');
+    this.reporter?.reportRecovered?.(src);
     this.emitStatus();
   }
 
@@ -200,7 +200,8 @@ class Brain {
         });
     attempt
       .then(() => {
-        this.reporter?.reportRecovered?.(err.source);
+        // 重试窗口期内若已发生新的失败（state.error 被重新置位），不误报恢复
+        if (!this.state.error) this.reporter?.reportRecovered?.(err.source);
         this.emitStatus();
       })
       .catch(() => {
