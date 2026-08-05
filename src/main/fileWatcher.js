@@ -35,9 +35,12 @@ class FileWatcher {
     this.onEvent = onEvent;
     this.onError = onError;
     this.watchers = new Map(); // root -> fs.FSWatcher
+    this.stopped = false;
+    this.remountTimer = null;
   }
 
   start() {
+    this.stopped = false;
     for (const root of this.drives) {
       try {
         const w = fs.watch(root, { recursive: true }, (eventType, filename) => {
@@ -56,10 +59,12 @@ class FileWatcher {
   }
 
   remount(root, err) {
+    if (this.stopped) return; // stop() 后的重挂窗口内不再重建
     this.onError?.(new Error(`监控 ${root} 失效：${err.message}`));
     try { this.watchers.get(root)?.close(); } catch { /* 已失效 */ }
     this.watchers.delete(root);
-    setTimeout(() => {
+    this.remountTimer = setTimeout(() => {
+      if (this.stopped) return;
       try {
         const w = fs.watch(root, { recursive: true }, (eventType, filename) => {
           if (!filename) return;
@@ -77,6 +82,9 @@ class FileWatcher {
   }
 
   stop() {
+    this.stopped = true;
+    clearTimeout(this.remountTimer);
+    this.remountTimer = null;
     for (const w of this.watchers.values()) {
       try { w.close(); } catch { /* 忽略 */ }
     }
