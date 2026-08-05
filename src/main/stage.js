@@ -39,6 +39,14 @@ class Stage {
     });
     win.setAlwaysOnTop(true, 'screen-saver');
     win.setIgnoreMouseEvents(true, { forward: true });
+    // 内容保护：弹幕窗口从屏幕捕获（desktopCapturer/录屏）中排除。
+    // 否则弹幕动画会持续触发视觉变化检测 → 截图又生成新弹幕 → 自激循环烧 API 额度
+    win.setContentProtection(true);
+    // 窗口被销毁（显示器热插拔/睡眠唤醒等 display 事件竞态）时同步清理 Map，
+    // 防止 send 打到已销毁的 webContents 抛 "Object has been destroyed"
+    win.on('closed', () => {
+      if (this.windows.get(display.id) === win) this.windows.delete(display.id);
+    });
     win.loadFile(path.join(__dirname, '..', 'renderer', 'stage', 'danmaku.html'));
     this.windows.set(display.id, win);
   }
@@ -56,7 +64,8 @@ class Stage {
   }
 
   send(text, meta = {}) {
-    const wins = [...this.windows.values()];
+    // 过滤已销毁窗口（closed 清理之外的第二道防线，防 display 事件竞态）
+    const wins = [...this.windows.values()].filter((w) => !w.isDestroyed());
     if (wins.length === 0) return;
     const win = wins[Math.floor(Math.random() * wins.length)];
     win.webContents.send('danmaku', { text, meta });
@@ -65,6 +74,7 @@ class Stage {
   updateConfig(danmakuCfg) {
     this.config = { ...this.config, ...danmakuCfg };
     for (const win of this.windows.values()) {
+      if (win.isDestroyed()) continue;
       win.webContents.send('stage-config', this.config);
     }
   }

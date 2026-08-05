@@ -16,6 +16,8 @@ function buildMenu({ onQuit, onOpenSettings, onTogglePause, onToggleLocalMode, o
 
 function createTray(opts) {
   const icon = nativeImage.createFromPath(path.join(__dirname, '..', '..', 'assets', 'tray.png'));
+  // macOS 菜单栏用 template image（黑色+透明），系统自动适配深浅色模式
+  if (process.platform === 'darwin') icon.setTemplateImage(true);
   const tray = new Tray(icon);
   tray.setToolTip('BulletChat 桌面弹幕直播');
   const rebuild = () => {
