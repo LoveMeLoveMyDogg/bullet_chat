@@ -17,6 +17,8 @@ async function load() {
   $('dm-vision-interval').value = config.danmaku.minIntervalVisionSec;
   $('dm-event-age').value = config.danmaku.maxEventAgeSec;
   $('dm-max').value = config.danmaku.maxConcurrent;
+  $('dm-burst-min').value = config.danmaku.burstMin;
+  $('dm-burst-max').value = config.danmaku.burstMax;
   $('dm-local').checked = config.danmaku.localMode;
   $('dm-read-content').checked = config.danmaku.readFileContent;
   for (const rb of document.querySelectorAll('input[name=dm-position]')) {
@@ -178,6 +180,10 @@ $('btn-save').onclick = async () => {
   const ev = Number($('dm-event-age').value);
   config.danmaku.maxEventAgeSec = Number.isNaN(ev) ? 120 : Math.max(0, ev); // 0 = 不限时
   config.danmaku.maxConcurrent = Math.min(12, Math.max(1, Number($('dm-max').value) || 6));
+  const bmin = Math.max(1, Math.min(12, Number($('dm-burst-min').value) || 2));
+  const bmax = Math.max(bmin, Math.min(12, Number($('dm-burst-max').value) || 8));
+  config.danmaku.burstMin = bmin;
+  config.danmaku.burstMax = bmax; // 保存时校正 min<=max
   config.danmaku.localMode = $('dm-local').checked;
   config.danmaku.readFileContent = $('dm-read-content').checked;
   const checkedPos = document.querySelector('input[name=dm-position]:checked');

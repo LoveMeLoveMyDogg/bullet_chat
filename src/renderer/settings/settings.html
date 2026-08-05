@@ -50,6 +50,7 @@
     <label>视觉弹幕最小间隔（秒，防高频烧额度） <input id="dm-vision-interval" type="number" min="0" max="300" /></label>
     <label>事件时效（秒，超过不播报，0=不限） <input id="dm-event-age" type="number" min="0" max="3600" /></label>
     <label>同屏上限 <input id="dm-max" type="number" min="1" max="12" /></label>
+    <label>一次飘出条数范围 <input id="dm-burst-min" type="number" min="1" max="12" style="width:60px" /> ~ <input id="dm-burst-max" type="number" min="1" max="12" style="width:60px" /> 条/批（受同屏上限约束）</label>
     <label><input id="dm-local" type="checkbox" /> 本地模式（不调 API，用内置模板）</label>
     <label><input id="dm-read-content" type="checkbox" /> 读取文件内容片段（发送给 AI，可生成更懂内容的弹幕；仅读小文本文件）</label>
     <div class="label-row">弹幕位置：

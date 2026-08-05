@@ -51,6 +51,8 @@ test('typeKey 映射', () => {
 test('事件风暴：首次补充后缓冲充足，不重复调用', async () => {
   const { brain, generator } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600; // 缓冲不自动吐，保持充足
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1; // 逐条吐，便于断言
   for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
   await new Promise((r) => setTimeout(r, 40));
   assert.equal(generator.textCalls, 1, '首次补充一次即可');
@@ -61,6 +63,8 @@ test('事件风暴：首次补充后缓冲充足，不重复调用', async () =>
 test('缓冲：补充后缓冲充足，新事件不触发调用', async () => {
   const { brain, generator } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600; // 缓冲不自动吐，保持充足
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1; // 逐条吐，便于断言
   generator.chatCompletion = async () => { generator.textCalls++; return '["1","2","3","4","5"]'; }; // 一次补充 5 条
   brain.pushEntry(entry('create')); // 首次：缓冲空 → 补充
   await new Promise((r) => setTimeout(r, 30));
@@ -165,6 +169,8 @@ test('文字补充失败置错：错误期间不补充，恢复后重新补充',
 test('视觉错误不影响文字弹幕', async () => {
   const { brain, danmaku, generator } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600; // 缓冲保持充足，文字只补充一次
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1; // 逐条吐，便于断言
   generator.visionCompletion = async () => { throw new Error('视觉挂了'); };
   brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
   await new Promise((r) => setTimeout(r, 30));
@@ -329,5 +335,32 @@ test('暂停时 retryNow 不发探测请求，恢复后正常', async () => {
   brain.retryNow();
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(generator.textCalls, before + 1, '恢复后重试应发请求');
+  brain.stop();
+});
+
+test('批量吐出：一批飘出 burstMin~burstMax 条，受缓冲余量约束', async () => {
+  const { brain, danmaku, generator } = makeEnv({ rng: () => 0.5 });
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.burstMin = 2;
+  brain.config.danmaku.burstMax = 8;
+  generator.chatCompletion = async () => { generator.textCalls++; return '["1","2","3","4","5","6","7","8","9","10"]'; };
+  brain.pushEntry(entry('create')); // 补充 10 条
+  await new Promise((r) => setTimeout(r, 30));
+  // maxConcurrent=6 约束：max=min(8,6,10)=6 → n = 2 + floor(0.5*(6-2+1)) = 4 条一批
+  assert.equal(danmaku.length, 4, '一批应飘出 4 条（rng 固定）');
+  assert.equal(brain.buffer.length, 6, '剩余 6 条在缓冲');
+  brain.stop();
+});
+
+test('批量吐出：批大小不超过同屏上限与缓冲余量', async () => {
+  const { brain, danmaku } = makeEnv({ rng: () => 0.99 });
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.burstMin = 2;
+  brain.config.danmaku.burstMax = 8;
+  brain.config.danmaku.maxConcurrent = 3; // 同屏上限 3
+  brain.buffer.push('a', 'b'); // 缓冲只有 2 条
+  brain.scheduleEmit();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(danmaku.length, 2, '缓冲余量 2 条，全出');
   brain.stop();
 });

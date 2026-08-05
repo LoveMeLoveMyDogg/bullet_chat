@@ -181,20 +181,31 @@ class Brain {
     this.generateVision(batch);
   }
 
-  // 弹幕吐出：按 minIntervalSec 节奏从缓冲逐条发；补充后第一条立即出（不等满间隔）
+  // 弹幕吐出：按 minIntervalSec 节奏一批批飘（每批 burstMin~burstMax 条随机，像直播间弹幕雨）。
+  // 批大小受同屏上限（maxConcurrent）与缓冲余量约束；补充后第一批立即出（不等满间隔）
   scheduleEmit() {
     if (this.emitTimer || this.state.paused) return;
     const sinceLast = this.lastEmitAt ? this.clock() - this.lastEmitAt : Infinity;
     const delay = Math.max(0, this.config.danmaku.minIntervalSec * 1000 - sinceLast);
     this.emitTimer = setTimeout(() => {
       this.emitTimer = null;
-      const text = this.buffer.shift();
-      if (text === undefined) {
+      if (this.buffer.length === 0) {
         this.maybeRefill(); // 缓冲空了：看内容池是否需要补充
         return;
       }
+      const max = Math.min(
+        this.config.danmaku.burstMax || 8,
+        this.config.danmaku.maxConcurrent || 6,
+        this.buffer.length
+      );
+      const min = Math.min(this.config.danmaku.burstMin || 2, max);
+      const n = min + Math.floor(this.rng() * (max - min + 1));
       this.lastEmitAt = this.clock();
-      this.onDanmaku(text, { source: 'ai' });
+      for (let i = 0; i < n; i++) {
+        const text = this.buffer.shift();
+        if (text === undefined) break;
+        this.onDanmaku(text, { source: 'ai' });
+      }
       if (this.buffer.length) this.scheduleEmit();
       else this.maybeRefill();
     }, delay);
