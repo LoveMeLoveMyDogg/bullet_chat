@@ -1,0 +1,18 @@
+body { font-family: "Microsoft YaHei", sans-serif; margin: 16px; background: #1e1e2e; color: #eee; }
+h1 { font-size: 18px; margin: 0 0 8px; }
+h2 { font-size: 14px; border-bottom: 1px solid #444; padding-bottom: 4px; margin-top: 18px; }
+h3 { font-size: 12px; margin: 12px 0 4px; }
+section { margin-bottom: 8px; }
+label { display: block; margin: 6px 0; font-size: 13px; }
+input[type="text"], input[type="password"], input[type="number"] { width: 300px; margin-left: 8px; background: #2a2a3e; color: #eee; border: 1px solid #555; padding: 4px 6px; }
+input[type="checkbox"] { margin-right: 6px; }
+button { margin: 6px 6px 6px 0; padding: 6px 14px; background: #4a6cf7; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+button:disabled { background: #666; cursor: default; }
+#status-bar { font-size: 12px; padding: 4px 8px; border-radius: 4px; display: inline-block; }
+#status-bar.ok { background: #1b5e20; }
+#status-bar.err { background: #b71c1c; }
+.result { font-size: 12px; margin: 4px 0; }
+.result.ok { color: #7cfc00; }
+.result.err { color: #ff5252; }
+#mask-canvas { border: 1px solid #555; background: #111; cursor: crosshair; max-width: 100%; }
+footer { margin-top: 18px; padding-top: 10px; border-top: 1px solid #444; }

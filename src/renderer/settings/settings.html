@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="stylesheet" href="settings.css" />
+</head>
+<body>
+  <header>
+    <h1>BulletChat 设置</h1>
+    <div id="status-bar">状态：加载中…</div>
+  </header>
+
+  <section>
+    <h2>文字模型（文件弹幕）</h2>
+    <label>接口地址 <input id="text-baseUrl" placeholder="https://api.deepseek.com" /></label>
+    <label>API Key <input id="text-apiKey" type="password" placeholder="sk-..." /></label>
+    <label>模型名 <input id="text-model" placeholder="deepseek-chat" /></label>
+    <button id="btn-test-text">测试连接</button>
+    <div id="text-test-result"></div>
+  </section>
+
+  <section>
+    <h2>视觉模型（屏幕弹幕）</h2>
+    <label><input id="vision-enabled" type="checkbox" /> 启用屏幕识别</label>
+    <label>接口地址 <input id="vision-baseUrl" placeholder="https://..." /></label>
+    <label>API Key <input id="vision-apiKey" type="password" placeholder="sk-..." /></label>
+    <label>模型名 <input id="vision-model" placeholder="qwen-vl-max" /></label>
+    <label>截图间隔（秒） <input id="vision-interval" type="number" min="2" max="60" /></label>
+    <button id="btn-test-vision">测试连接</button>
+    <div id="vision-test-result"></div>
+  </section>
+
+  <section>
+    <h2>监控</h2>
+    <div id="drives"></div>
+    <h3>隐私遮罩（截图发送前涂黑的区域）</h3>
+    <select id="mask-display"></select>
+    <div id="mask-canvas-wrap"><canvas id="mask-canvas" width="640" height="360"></canvas></div>
+    <button id="btn-mask-clear">清空遮罩</button>
+  </section>
+
+  <section>
+    <h2>弹幕</h2>
+    <label>最小间隔（秒） <input id="dm-interval" type="number" min="0" max="300" /></label>
+    <label>同屏上限 <input id="dm-max" type="number" min="1" max="12" /></label>
+    <label><input id="dm-anim" type="checkbox" /> 动画</label>
+    <label><input id="dm-local" type="checkbox" /> 本地模式（不调 API，用内置模板）</label>
+    <label>风格池（逗号分隔） <input id="dm-styles" /></label>
+  </section>
+
+  <section>
+    <h2>系统</h2>
+    <label><input id="sys-autostart" type="checkbox" /> 开机自启</label>
+  </section>
+
+  <footer>
+    <button id="btn-save">保存</button>
+    <span id="save-result"></span>
+  </footer>
+
+  <script src="settings.js"></script>
+</body>
+</html>
