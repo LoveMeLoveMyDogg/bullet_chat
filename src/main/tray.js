@@ -1,19 +1,34 @@
 const { Tray, Menu, nativeImage } = require('electron');
-const path = require('path');
+const path = require('node:path');
 
-function createTray({ onQuit, onOpenSettings, onTogglePause, onToggleLocalMode }) {
+function buildMenu({ onQuit, onOpenSettings, onTogglePause, onToggleLocalMode, paused = false, localMode = false }) {
+  return Menu.buildFromTemplate([
+    { label: '打开设置', click: onOpenSettings },
+    { type: 'separator' },
+    { label: paused ? '继续弹幕' : '暂停弹幕', click: onTogglePause },
+    { label: '本地模式', type: 'checkbox', checked: localMode, click: onToggleLocalMode },
+    { type: 'separator' },
+    { label: '退出', click: onQuit },
+  ]);
+}
+
+function createTray(opts) {
   const icon = nativeImage.createFromPath(path.join(__dirname, '..', '..', 'assets', 'tray.png'));
   const tray = new Tray(icon);
   tray.setToolTip('BulletChat 桌面弹幕直播');
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: '打开设置', click: onOpenSettings },
-    { type: 'separator' },
-    { label: '暂停弹幕', click: onTogglePause },
-    { label: '本地模式', type: 'checkbox', checked: false, click: onToggleLocalMode },
-    { type: 'separator' },
-    { label: '退出', click: onQuit },
-  ]));
+  const rebuild = () => {
+    const state = opts.getState ? opts.getState() : {};
+    tray.setContextMenu(buildMenu({
+      onQuit: opts.onQuit,
+      onOpenSettings: opts.onOpenSettings,
+      onTogglePause: () => { opts.onTogglePause(); rebuild(); },
+      onToggleLocalMode: () => { opts.onToggleLocalMode(); rebuild(); },
+      paused: !!state.paused,
+      localMode: !!state.localMode,
+    }));
+  };
+  rebuild();
   return tray;
 }
 
-module.exports = { createTray };
+module.exports = { createTray, buildMenu };
