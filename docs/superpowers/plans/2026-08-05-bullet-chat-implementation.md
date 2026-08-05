@@ -129,9 +129,12 @@ const { createTray } = require('./tray');
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  app.quit();
+  // 第二实例：直接退出（app.exit 在 ready 事件前也生效，quit() 在 Windows 上可能无效）
+  app.exit(0);
 } else {
-  app.on('second-instance', () => app.quit());
+  app.on('second-instance', () => {
+    // 已有实例在运行，保持其存活，不执行任何操作
+  });
 
   app.whenReady().then(() => {
     // 托盘常驻，关闭所有窗口也不退出
@@ -517,7 +520,7 @@ function formatEventDescription(entry) {
     case 'rename':
       return `用户把文件改名成「${name}」${loc}`;
     case 'move':
-      return `用户把「${name}」移动到了${loc}`;
+      return `用户把「${name}」移动到了${entry.drive || ''}`;
     case 'change':
       return `用户修改了「${name}」${loc}`;
     case 'screen':
@@ -676,9 +679,12 @@ class FileWatcher {
     this.onEvent = onEvent;
     this.onError = onError;
     this.watchers = new Map(); // root -> fs.FSWatcher
+    this.stopped = false;
+    this.remountTimer = null;
   }
 
   start() {
+    this.stopped = false;
     for (const root of this.drives) {
       try {
         const w = fs.watch(root, { recursive: true }, (eventType, filename) => {
@@ -697,10 +703,12 @@ class FileWatcher {
   }
 
   remount(root, err) {
+    if (this.stopped) return; // stop() 后的重挂窗口内不再重建
     this.onError?.(new Error(`监控 ${root} 失效：${err.message}`));
     try { this.watchers.get(root)?.close(); } catch { /* 已失效 */ }
     this.watchers.delete(root);
-    setTimeout(() => {
+    this.remountTimer = setTimeout(() => {
+      if (this.stopped) return;
       try {
         const w = fs.watch(root, { recursive: true }, (eventType, filename) => {
           if (!filename) return;
@@ -718,6 +726,9 @@ class FileWatcher {
   }
 
   stop() {
+    this.stopped = true;
+    clearTimeout(this.remountTimer);
+    this.remountTimer = null;
     for (const w of this.watchers.values()) {
       try { w.close(); } catch { /* 忽略 */ }
     }
@@ -811,7 +822,7 @@ test('buildSystemPrompt 包含风格与 JSON 要求与示例', () => {
   const p = buildSystemPrompt(['阴阳怪气损友']);
   assert.ok(p.includes('阴阳怪气损友'));
   assert.ok(p.includes('JSON'));
-  assert.ok(p.includes('新建文件夹不改名字吗'));
+  assert.ok(p.includes('新建了文件夹不改名字吗'));
 });
 ```
 
@@ -1410,6 +1421,7 @@ test('攒批：10 条事件触发一次生成，弹幕≤3 条', async () => {
   assert.equal(generator.textCalls, 1);
   assert.equal(danmaku.length, 2);
   assert.equal(danmaku[0].meta.source, 'ai');
+  brain.stop();
 });
 
 test('限速：minIntervalSec 内第二次 flush 被丢弃', async () => {
@@ -1429,7 +1441,7 @@ test('限速：minIntervalSec 内第二次 flush 被丢弃', async () => {
 test('change 事件 2 秒内同路径合并为一条描述', async () => {
   const { brain, generator } = makeEnv();
   let lastUser = '';
-  generator.chatCompletion = async ({ user }) => { lastUser = user; return '["x"]'; };
+  generator.chatCompletion = async ({ user }) => { generator.textCalls++; lastUser = user; return '["x"]'; };
   for (let i = 0; i < 3; i++) brain.pushEntry(entry('change'));
   brain.flushNow();
   await new Promise((r) => setTimeout(r, 20));
@@ -1485,6 +1497,34 @@ test('暂停：pushEntry 不生效', async () => {
   brain.flushNow();
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(generator.textCalls, 0);
+  brain.stop();
+});
+
+test('无错误时成功批次不通知恢复', async () => {
+  const { brain, reporter } = makeEnv();
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(reporter.recovered.length, 0);
+  brain.stop();
+});
+
+test('错误后成功批次恢复并报告正确来源', async () => {
+  const { brain, reporter } = makeEnv();
+  // 在途竞态：批次 1 慢请求在途时，批次 2 快速失败置错；批次 1 成功后经 emitParsed→clearError 恢复
+  let call = 0;
+  brain.generator.chatCompletion = async () => {
+    call++;
+    if (call === 1) return new Promise((r) => setTimeout(() => r('["恢复啦"]'), 40));
+    throw new Error('第二个挂了');
+  };
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create')); // 批次 1：慢请求在途
+  await new Promise((r) => setTimeout(r, 10));
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create')); // 批次 2：快失败置错
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(brain.getStatus().error);
+  await new Promise((r) => setTimeout(r, 60)); // 批次 1 成功返回 → 恢复
+  assert.equal(brain.getStatus().error, null);
+  assert.ok(reporter.recovered.includes('text'));
   brain.stop();
 });
 ```
@@ -1604,7 +1644,7 @@ class Brain {
         model: this.config.textModel.model,
         system, user,
       });
-      this.emitParsed(raw, 'text');
+      this.emitParsed(raw);
     } catch (err) {
       this.fail('text', err);
     }
@@ -1621,96 +1661,20 @@ class Brain {
         system,
         imageDataUrl: entry.imageDataUrl,
       });
-      this.emitParsed(raw, 'vision');
+      this.emitParsed(raw);
     } catch (err) {
       this.fail('vision', err);
     }
   }
-  constructor({ config, generator, templates, reporter, clock = Date.now, rng = Math.random, onDanmaku, onStatus }) {
-    this.config = config;
-    this.generator = generator;
-    this.templates = templates;
-    this.reporter = reporter;
-    this.clock = clock;
-    this.rng = rng;
-    this.onDanmaku = onDanmaku;
-    this.onStatus = onStatus;
-    this.queue = [];
-    this.changeSeen = new Map();
-    this.lastEmit = 0;
-    this.batchTimer = null;
-    this.retryTimer = null;
-    this.state = { mode: 'idle', paused: false, localMode: !!config.danmaku.localMode, error: null };
-  }
 
-  start() {
-    this.state.mode = 'running';
-    this.scheduleBatch();
-    this.scheduleRetry();
-    this.emitStatus();
-  }
-
-  stop() {
-    clearTimeout(this.batchTimer);
-    clearTimeout(this.retryTimer);
-    this.state.mode = 'idle';
-  }
-
-  pushEntry(entry) {
-    if (this.state.paused) return;
-    if (entry.type === 'change') {
-      const now = this.clock();
-      const last = this.changeSeen.get(entry.path);
-      if (last !== undefined && now - last < COALESCE_MS) {
-        this.changeSeen.set(entry.path, now);
-        return;
-      }
-      this.changeSeen.set(entry.path, now);
-    }
-    if (this.state.localMode) {
-      this.emitLocal(entry);
-      return;
-    }
-    this.queue.push(entry);
-    if (this.queue.length >= BATCH_SIZE) this.flushNow();
-  }
-
-  scheduleBatch() {
-    this.batchTimer = setTimeout(() => {
-      this.flushNow();
-      this.scheduleBatch();
-    }, this.config.danmaku.batchIntervalMs);
-  }
-
-  scheduleRetry() {
-    this.retryTimer = setTimeout(() => {
-      this.retryNow();
-      this.scheduleRetry();
-    }, RETRY_MS);
-  }
-
-  flushNow() {
-    if (this.queue.length === 0) return;
-    if (this.state.error) { this.queue.length = 0; return; }
-    const now = this.clock();
-    if (now - this.lastEmit < this.config.danmaku.minIntervalSec * 1000) {
-      this.queue.length = 0;
-      return;
-    }
-    const batch = this.queue.splice(0, BATCH_SIZE);
-    if (batch[0] && batch[0].source === 'screen') this.generateVision(batch);
-    else this.generateText(batch);
-  }
-
-  emitParsed(raw, source) {
+  emitParsed(raw) {
     const lines = parseDanmakuJson(raw);
     if (lines.length === 0) return;
     this.lastEmit = this.clock();
     for (const line of lines) {
-      this.onDanmaku(line, { source });
+      this.onDanmaku(line, { source: 'ai' });
     }
     if (this.state.error) this.clearError();
-    else this.reporter?.reportRecovered?.(source);
     this.emitStatus();
   }
 
@@ -1729,8 +1693,10 @@ class Brain {
   }
 
   clearError() {
+    // 只在实际错误→成功转换时通知恢复，并报告被记住的错误来源
+    const src = this.state.error ? this.state.error.source : 'text';
     this.state.error = null;
-    this.reporter?.reportRecovered?.('text');
+    this.reporter?.reportRecovered?.(src);
     this.emitStatus();
   }
 
@@ -1770,7 +1736,8 @@ class Brain {
         });
     attempt
       .then(() => {
-        this.reporter?.reportRecovered?.(err.source);
+        // 探测窗口内若又发生新错误（并发批次失败），则不误报恢复
+        if (!this.state.error) this.reporter?.reportRecovered?.(err.source);
         this.emitStatus();
       })
       .catch(() => {
@@ -2005,7 +1972,7 @@ function show(text, meta = {}) {
   el.style.fontSize = (meta.source === 'local' ? 26 : 30 + Math.floor(Math.random() * 10)) + 'px';
   if (!config.animationsEnabled) el.style.left = '20px';
   lane.el.appendChild(el);
-  const duration = 8000;
+  const duration = 9000; // 与 .anim-fly 的 9s 对齐，避免弹幕中途被移除
   setTimeout(() => { el.remove(); lane.busy = false; }, duration);
 }
 
@@ -2013,7 +1980,7 @@ window.api.onStageConfig((cfg) => {
   config = { ...config, ...cfg };
   buildLanes();
 });
-window.api.getStageConfig().then((cfg) => { config = { ...config, ...cfg }; buildLanes(); });
+window.api.getStageConfig().then((cfg) => { config = { ...config, ...cfg }; buildLanes(); }).catch(() => {});
 window.api.onDanmaku(({ text, meta }) => show(text, meta));
 
 // 开发辅助：看不到弹幕时在控制台手动试 window.show('测试弹幕')
@@ -2558,13 +2525,20 @@ function applyConfig(saved, { silent = false } = {}) {
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  app.quit();
+  // 第二实例：直接退出（app.exit 在 ready 事件前也生效，quit() 在 Windows 上可能无效）
+  app.exit(0);
 } else {
-  app.on('second-instance', () => app.quit());
+  app.on('second-instance', () => {
+    // 已有实例在运行，保持其存活，不执行任何操作
+  });
 
   app.whenReady().then(() => {
     config = loadConfig();
-    reporter = new ErrorReporter({ notify, logDir: path.join(app.getPath('userData'), 'logs') });
+    // 状态广播：以 ErrorReporter 的 {state, text} 形状为准（设置窗口状态条消费）
+    const broadcastStatus = (s) => {
+      for (const win of BrowserWindow.getAllWindows()) win.webContents.send('status-changed', s);
+    };
+    reporter = new ErrorReporter({ notify, logDir: path.join(app.getPath('userData'), 'logs'), onStatus: broadcastStatus });
 
     brain = new Brain({
       config,
@@ -2572,10 +2546,6 @@ if (!gotLock) {
       templates,
       reporter,
       onDanmaku: (text, meta) => stage?.send(text, meta),
-      onStatus: (s) => {
-        // 状态广播给所有窗口（设置窗口状态条 + 弹幕窗口）
-        for (const win of BrowserWindow.getAllWindows()) win.webContents.send('status-changed', s);
-      },
     });
 
     stage = new Stage({ preloadPath: PRELOAD });
@@ -2938,12 +2908,8 @@ window.processor.onProcess(async (payload) => {
 const { ScreenWatcher } = require('./screenWatcher');
 const { ImageProcessor } = require('./imageProcessor');
 
-// whenReady 内、brain 创建后：
-const processor = new ImageProcessor({ preloadPath: PRELOAD });
-processor.init().catch((err) => reporter.reportError('screen', err));
-ipcMain.on('process:resolve', (_e, { id, dataUrl }) => processor.resolve(id, dataUrl));
-ipcMain.on('process:error', (_e, { id, message }) => processor.reject(id, new Error(message)));
-
+// 模块作用域（与 watcher/stage 并列，applyConfig 定义之前）——applyConfig 会调用它，
+// 若声明在 whenReady 回调内会因作用域不可见而抛 ReferenceError
 let screenWatcher = null;
 function applyScreenWatcher() {
   if (screenWatcher) screenWatcher.stop();
@@ -2962,9 +2928,16 @@ function applyScreenWatcher() {
   });
   screenWatcher.start();
 }
-applyScreenWatcher();
-// 在 applyConfig 末尾追加 applyScreenWatcher();
 ```
+
+whenReady 内、brain 创建后追加（processor 初始化与 IPC 监听注册一次）：
+```js
+const processor = new ImageProcessor({ preloadPath: PRELOAD });
+processor.init().catch((err) => reporter.reportError('screen', err));
+ipcMain.on('process:resolve', (_e, { id, dataUrl }) => processor.resolve(id, dataUrl));
+ipcMain.on('process:error', (_e, { id, message }) => processor.reject(id, new Error(message)));
+```
+（`processor` 变量在 whenReady 内创建后，模块级 applyScreenWatcher 引用它——把 `let processor = null;` 声明在模块级、whenReady 内赋值，保证引用合法。）
 
 - [ ] **Step 7: 手动验证（需要视觉模型 key）**
 

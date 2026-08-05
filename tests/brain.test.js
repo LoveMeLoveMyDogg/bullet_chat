@@ -1,0 +1,214 @@
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { Brain, typeKey } = require('../src/shared/brain');
+const { defaultConfig } = require('../src/shared/configCore');
+const templates = require('../src/shared/templates');
+
+function makeEnv(overrides = {}) {
+  const danmaku = [];
+  const statuses = [];
+  const reporter = {
+    errors: [],
+    recovered: [],
+    reportError(source, err) { this.errors.push({ source, message: err.message }); },
+    reportRecovered(source) { this.recovered.push(source); },
+  };
+  const generator = {
+    textCalls: 0,
+    chatCompletion: async () => { generator.textCalls++; return '["弹幕1","弹幕2"]'; },
+    visionCalls: 0,
+    visionCompletion: async () => { generator.visionCalls++; return '["屏幕弹幕"]'; },
+  };
+  const cfg = defaultConfig();
+  cfg.danmaku.batchIntervalMs = 20;
+  cfg.danmaku.minIntervalSec = 0;
+  const brain = new Brain({
+    config: cfg, generator, reporter, templates,
+    onDanmaku: (text, meta) => danmaku.push({ text, meta }),
+    onStatus: (s) => statuses.push(s),
+    ...overrides,
+  });
+  brain.start();
+  return { brain, danmaku, statuses, reporter, generator, cfg };
+}
+
+const entry = (type, extra = {}) => ({ source: 'file', type, name: 'x.txt', path: 'C:\\x.txt', drive: 'C:', isDir: false, ...extra });
+
+test('typeKey 映射', () => {
+  assert.equal(typeKey({ type: 'create', isDir: true }), 'create_folder');
+  assert.equal(typeKey({ type: 'create', isDir: false }), 'create_file');
+  assert.equal(typeKey({ type: 'delete' }), 'delete');
+  assert.equal(typeKey({ type: 'rename' }), 'rename');
+  assert.equal(typeKey({ type: 'move' }), 'move');
+  assert.equal(typeKey({ type: 'change' }), 'change');
+  assert.equal(typeKey({ type: 'screen', source: 'screen' }), 'screen');
+});
+
+test('攒批：10 条事件触发一次生成，弹幕≤3 条', async () => {
+  const { brain, danmaku, generator } = makeEnv();
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(generator.textCalls, 1);
+  assert.equal(danmaku.length, 2);
+  assert.equal(danmaku[0].meta.source, 'ai');
+  brain.stop();
+});
+
+test('限速：minIntervalSec 内第二次 flush 被丢弃', async () => {
+  const { brain, danmaku, generator } = makeEnv();
+  const cfg2 = defaultConfig();
+  cfg2.danmaku.minIntervalSec = 3600;
+  brain.refreshConfig(cfg2);
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(generator.textCalls, 1);
+  assert.equal(danmaku.length, 2);
+  brain.stop();
+});
+
+test('change 事件 2 秒内同路径合并为一条描述', async () => {
+  const { brain, generator } = makeEnv();
+  let lastUser = '';
+  generator.chatCompletion = async ({ user }) => { generator.textCalls++; lastUser = user; return '["x"]'; };
+  for (let i = 0; i < 3; i++) brain.pushEntry(entry('change'));
+  brain.flushNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 1);
+  assert.equal((lastUser.match(/用户修改了/g) || []).length, 1); // 3 条合并成 1 条
+  brain.stop();
+});
+
+test('生成失败：状态置错、报错给 reporter、不产出弹幕', async () => {
+  const { brain, danmaku, reporter } = makeEnv();
+  const orig = brain.generator.chatCompletion;
+  brain.generator.chatCompletion = async () => { throw new Error('测试错误'); };
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(reporter.errors.length, 1);
+  assert.equal(reporter.errors[0].message, '测试错误');
+  assert.equal(danmaku.length, 0);
+  assert.equal(brain.getStatus().error.source, 'text');
+  brain.generator.chatCompletion = orig;
+  brain.stop();
+});
+
+test('恢复：retryNow 成功后清除错误并通知', async () => {
+  const { brain, reporter } = makeEnv();
+  brain.generator.chatCompletion = async () => { throw new Error('先挂一下'); };
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(brain.getStatus().error);
+  brain.generator.chatCompletion = async () => '通';
+  brain.retryNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(brain.getStatus().error, null);
+  assert.ok(reporter.recovered.includes('text'));
+  brain.stop();
+});
+
+test('本地模式：不走 API，弹幕带【本地】前缀', async () => {
+  const { brain, danmaku, generator } = makeEnv();
+  brain.setLocalMode(true);
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 0);
+  assert.equal(danmaku.length, 1);
+  assert.ok(danmaku[0].text.startsWith('【本地】'));
+  assert.equal(danmaku[0].meta.source, 'local');
+  brain.stop();
+});
+
+test('暂停：pushEntry 不生效', async () => {
+  const { brain, generator } = makeEnv();
+  brain.pause();
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  brain.flushNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 0);
+  brain.stop();
+});
+
+test('无错误时成功批次不通知恢复', async () => {
+  const { brain, reporter } = makeEnv();
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(reporter.recovered.length, 0);
+  brain.stop();
+});
+
+test('错误后成功批次恢复并报告正确来源', async () => {
+  const { brain, reporter } = makeEnv();
+  // 在途竞态：批次 1 慢请求在途时，批次 2 快速失败置错；批次 1 成功后经 emitParsed→clearError 恢复
+  let call = 0;
+  brain.generator.chatCompletion = async () => {
+    call++;
+    if (call === 1) return new Promise((r) => setTimeout(() => r('["恢复啦"]'), 40));
+    throw new Error('第二个挂了');
+  };
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create')); // 批次 1：慢请求在途
+  await new Promise((r) => setTimeout(r, 10));
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create')); // 批次 2：快失败置错
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(brain.getStatus().error);
+  await new Promise((r) => setTimeout(r, 60)); // 批次 1 成功返回 → 恢复
+  assert.equal(brain.getStatus().error, null);
+  assert.ok(reporter.recovered.includes('text'));
+  brain.stop();
+});
+
+test('视觉错误不影响文字弹幕', async () => {
+  const { brain, danmaku, generator } = makeEnv();
+  generator.visionCompletion = async () => { throw new Error('视觉挂了'); };
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
+  brain.flushNow();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(brain.getStatus().error);
+  assert.equal(brain.getStatus().error.source, 'vision');
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(generator.textCalls, 1); // 文字通道照常生成
+  assert.ok(danmaku.length > 0); // 产出弹幕
+  assert.equal(brain.getStatus().error.source, 'vision'); // 视觉错误保持
+  brain.stop();
+});
+
+test('视觉重试用真实图片', async () => {
+  const { brain, generator } = makeEnv();
+  let calls = 0;
+  let seenImage = '';
+  generator.visionCompletion = async ({ imageDataUrl }) => {
+    calls++;
+    if (calls === 1) throw new Error('第一次失败');
+    seenImage = imageDataUrl;
+    return '["重试成功"]';
+  };
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
+  brain.flushNow();
+  await new Promise((r) => setTimeout(r, 30));
+  assert.ok(brain.getStatus().error);
+  assert.equal(brain.getStatus().error.source, 'vision');
+  brain.retryNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(seenImage, 'data:image/jpeg;base64,TEST'); // 重试探测用真实截图而非空图
+  assert.equal(brain.getStatus().error, null);
+  brain.stop();
+});
+
+test('混合批次：屏幕条目与文件条目拆批，视觉用真实截图', async () => {
+  const { brain, generator } = makeEnv();
+  let visionImage = null;
+  let lastTextUser = '';
+  generator.visionCompletion = async ({ imageDataUrl }) => { visionImage = imageDataUrl; return '["屏幕弹"]'; };
+  generator.chatCompletion = async ({ user }) => { generator.textCalls++; lastTextUser = user; return '["文件弹"]'; };
+  // 队列：5 个文件条目在前，1 个屏幕条目在后（模拟真实混合）
+  for (let i = 0; i < 5; i++) brain.pushEntry(entry('create'));
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,REALSCREEN' });
+  brain.flushNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(visionImage, 'data:image/jpeg;base64,REALSCREEN'); // 不再是 undefined
+  assert.ok(!lastTextUser.includes('屏幕'), '文字批次不应包含屏幕条目描述');
+  assert.equal(generator.textCalls, 1);
+  brain.stop();
+});
