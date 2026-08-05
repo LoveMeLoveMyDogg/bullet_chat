@@ -8,10 +8,11 @@ const { makeNoiseFilter } = require('../shared/noiseFilter');
 const templates = require('../shared/templates');
 const { testTextConnection, testVisionConnection } = require('./generator');
 const { Stage } = require('./stage');
-const { ErrorReporter, sourceLabel } = require('./errorReporter');
+const { ErrorReporter } = require('./errorReporter');
 const { createSettingsWindow, registerSettingsIpc } = require('./settingsWindow');
 const { ScreenWatcher } = require('./screenWatcher');
 const { ImageProcessor } = require('./imageProcessor');
+const { startDemo, stopDemo } = require('./demoMode');
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'preload.js');
 
@@ -21,6 +22,7 @@ let stage = null;
 let reporter = null;
 let config = null;
 let paused = false;
+let demoHandle = null;
 
 function notify(title, body) {
   try { new Notification({ title, body }).show(); } catch { /* 忽略 */ }
@@ -102,8 +104,6 @@ if (!gotLock) {
       });
       screenWatcher.start();
     }
-    applyScreenWatcher();
-
     stage = new Stage({ preloadPath: PRELOAD });
     stage.start();
     stage.updateConfig(config.danmaku);
@@ -121,8 +121,9 @@ if (!gotLock) {
     applyConfig(config, { silent: true }); // 初次装配（含自启与监控启动），不弹通知
     brain.start();
 
-    createTray({
-      getState: () => ({ paused, localMode: brain.getStatus().localMode }),
+    // 托盘对象必须持有全局引用，否则会被 GC 回收导致图标消失
+    global.__tray = createTray({
+      getState: () => ({ paused, localMode: brain.getStatus().localMode, demo: !!demoHandle }),
       onQuit: () => app.quit(),
       onOpenSettings: () => {
         const settingsWin = createSettingsWindow({ preloadPath: PRELOAD });
@@ -141,6 +142,16 @@ if (!gotLock) {
       onToggleLocalMode: () => {
         brain.setLocalMode(!brain.getStatus().localMode);
         notify('BulletChat', brain.getStatus().localMode ? '已切换到本地模式（弹幕将带【本地】标记）' : '已退出本地模式');
+      },
+      onToggleDemo: () => {
+        if (demoHandle) {
+          stopDemo(demoHandle);
+          demoHandle = null;
+          notify('BulletChat', '演示模式已关闭');
+        } else {
+          demoHandle = startDemo({ onEntry: (e) => brain?.pushEntry(e) });
+          notify('BulletChat', '演示模式已开启（模拟事件流）');
+        }
       },
     });
   });

@@ -26,6 +26,7 @@ class ScreenWatcher {
     this.onError = onError;
     this.processor = processor;
     this.timer = null;
+    this.ticking = false;
     this.last = new Map(); // display_id -> { bits }
   }
 
@@ -42,6 +43,8 @@ class ScreenWatcher {
   }
 
   async tick() {
+    if (this.ticking) return;
+    this.ticking = true;
     try {
       const sources = await desktopCapturer.getSources({
         types: ['screen'],
@@ -73,6 +76,8 @@ class ScreenWatcher {
       }
     } catch (err) {
       this.onError?.(new Error(`屏幕识别失败：${err.message}`));
+    } finally {
+      this.ticking = false;
     }
   }
 

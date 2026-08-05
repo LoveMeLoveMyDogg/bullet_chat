@@ -1,12 +1,13 @@
 const { Tray, Menu, nativeImage } = require('electron');
 const path = require('node:path');
 
-function buildMenu({ onQuit, onOpenSettings, onTogglePause, onToggleLocalMode, paused = false, localMode = false }) {
+function buildMenu({ onQuit, onOpenSettings, onTogglePause, onToggleLocalMode, onToggleDemo, paused = false, localMode = false, demo = false }) {
   return Menu.buildFromTemplate([
     { label: '打开设置', click: onOpenSettings },
     { type: 'separator' },
     { label: paused ? '继续弹幕' : '暂停弹幕', click: onTogglePause },
     { label: '本地模式', type: 'checkbox', checked: localMode, click: onToggleLocalMode },
+    { label: '演示模式（模拟事件）', type: 'checkbox', checked: demo, click: onToggleDemo },
     { type: 'separator' },
     { label: '退出', click: onQuit },
   ]);
@@ -23,8 +24,10 @@ function createTray(opts) {
       onOpenSettings: opts.onOpenSettings,
       onTogglePause: () => { opts.onTogglePause(); rebuild(); },
       onToggleLocalMode: () => { opts.onToggleLocalMode(); rebuild(); },
+      onToggleDemo: () => { opts.onToggleDemo(); rebuild(); },
       paused: !!state.paused,
       localMode: !!state.localMode,
+      demo: !!state.demo,
     }));
   };
   rebuild();
