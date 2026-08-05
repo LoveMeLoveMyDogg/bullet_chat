@@ -2534,7 +2534,11 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     config = loadConfig();
-    reporter = new ErrorReporter({ notify, logDir: path.join(app.getPath('userData'), 'logs') });
+    // 状态广播：以 ErrorReporter 的 {state, text} 形状为准（设置窗口状态条消费）
+    const broadcastStatus = (s) => {
+      for (const win of BrowserWindow.getAllWindows()) win.webContents.send('status-changed', s);
+    };
+    reporter = new ErrorReporter({ notify, logDir: path.join(app.getPath('userData'), 'logs'), onStatus: broadcastStatus });
 
     brain = new Brain({
       config,
@@ -2542,10 +2546,6 @@ if (!gotLock) {
       templates,
       reporter,
       onDanmaku: (text, meta) => stage?.send(text, meta),
-      onStatus: (s) => {
-        // 状态广播给所有窗口（设置窗口状态条 + 弹幕窗口）
-        for (const win of BrowserWindow.getAllWindows()) win.webContents.send('status-changed', s);
-      },
     });
 
     stage = new Stage({ preloadPath: PRELOAD });

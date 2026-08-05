@@ -56,7 +56,15 @@ if (!gotLock) {
 
   app.whenReady().then(() => {
     config = loadConfig();
-    reporter = new ErrorReporter({ notify, logDir: path.join(app.getPath('userData'), 'logs') });
+    // 状态广播统一走 reporter 状态形状 {state,text}（设置窗口状态条消费该结构）
+    const broadcastStatus = (s) => {
+      for (const win of BrowserWindow.getAllWindows()) win.webContents.send('status-changed', s);
+    };
+    reporter = new ErrorReporter({
+      notify,
+      logDir: path.join(app.getPath('userData'), 'logs'),
+      onStatus: broadcastStatus,
+    });
 
     brain = new Brain({
       config,
@@ -64,10 +72,6 @@ if (!gotLock) {
       templates,
       reporter,
       onDanmaku: (text, meta) => stage?.send(text, meta),
-      onStatus: (s) => {
-        // 状态广播给所有窗口（设置窗口状态条 + 弹幕窗口）
-        for (const win of BrowserWindow.getAllWindows()) win.webContents.send('status-changed', s);
-      },
     });
 
     stage = new Stage({ preloadPath: PRELOAD });
@@ -90,7 +94,14 @@ if (!gotLock) {
     createTray({
       getState: () => ({ paused, localMode: brain.getStatus().localMode }),
       onQuit: () => app.quit(),
-      onOpenSettings: () => createSettingsWindow({ preloadPath: PRELOAD }),
+      onOpenSettings: () => {
+        const settingsWin = createSettingsWindow({ preloadPath: PRELOAD });
+        // 新打开/复用的设置窗口都立即收到当前状态：did-finish-load 时 renderer 监听器已就绪；
+        // 已加载完成的复用窗口则直接推送
+        const pushStatus = () => broadcastStatus(reporter.getStatus());
+        settingsWin?.webContents.once('did-finish-load', pushStatus);
+        if (!settingsWin?.webContents.isLoading()) pushStatus();
+      },
       onTogglePause: () => {
         paused = !paused;
         if (paused) brain.pause();
