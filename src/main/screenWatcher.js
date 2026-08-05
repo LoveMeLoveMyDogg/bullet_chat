@@ -79,7 +79,9 @@ class ScreenWatcher {
       }
       ok = true;
     } catch (err) {
-      this.onError?.(new Error(`屏幕识别失败：${err.message}`));
+      // 错误信息兜底：部分异常不是标准 Error（无 .message），直接显示 String(err)
+      const detail = err && err.message ? err.message : String(err);
+      this.onError?.(new Error(`屏幕识别失败：${detail}`));
       this.hadError = true;
     } finally {
       this.ticking = false;
