@@ -195,3 +195,20 @@ test('视觉重试用真实图片', async () => {
   assert.equal(brain.getStatus().error, null);
   brain.stop();
 });
+
+test('混合批次：屏幕条目与文件条目拆批，视觉用真实截图', async () => {
+  const { brain, generator } = makeEnv();
+  let visionImage = null;
+  let lastTextUser = '';
+  generator.visionCompletion = async ({ imageDataUrl }) => { visionImage = imageDataUrl; return '["屏幕弹"]'; };
+  generator.chatCompletion = async ({ user }) => { generator.textCalls++; lastTextUser = user; return '["文件弹"]'; };
+  // 队列：5 个文件条目在前，1 个屏幕条目在后（模拟真实混合）
+  for (let i = 0; i < 5; i++) brain.pushEntry(entry('create'));
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,REALSCREEN' });
+  brain.flushNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(visionImage, 'data:image/jpeg;base64,REALSCREEN'); // 不再是 undefined
+  assert.ok(!lastTextUser.includes('屏幕'), '文字批次不应包含屏幕条目描述');
+  assert.equal(generator.textCalls, 1);
+  brain.stop();
+});

@@ -94,11 +94,11 @@ class Brain {
       return;
     }
     const batch = this.queue.splice(0, BATCH_SIZE);
-    // 错误状态按通道隔离：只有该来源出错才丢弃本批，另一通道照常工作
-    const src = batch[0] && batch[0].source === 'screen' ? 'vision' : 'text';
-    if (this.state.error[src]) { this.queue.length = 0; return; }
-    if (src === 'vision') this.generateVision(batch);
-    else this.generateText(batch);
+    // 按来源拆批：屏幕条目走视觉、文件条目走文字，互不混串
+    const fileEntries = batch.filter((e) => e.source !== 'screen');
+    const screenEntries = batch.filter((e) => e.source === 'screen');
+    if (!this.state.error.text && fileEntries.length) this.generateText(fileEntries);
+    if (!this.state.error.vision && screenEntries.length) this.generateVision(screenEntries);
   }
 
   async generateText(batch) {
