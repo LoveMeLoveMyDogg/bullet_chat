@@ -1,5 +1,5 @@
 const { formatEventDescription } = require('./noiseFilter');
-const { pickStyles, buildSystemPrompt } = require('./styles');
+const { pickStyles, pickRoles, buildSystemPrompt } = require('./styles');
 const { templateFor, fillTemplate } = require('./templates');
 const { parseDanmakuJson, RED_SQUARE_DATA_URL } = require('../main/generator');
 const fs = require('node:fs');
@@ -235,6 +235,7 @@ class Brain {
   }
 
   retryNow() {
+    if (this.state.paused) return; // 暂停弹幕时也不发重试探测（省额度）
     for (const src of ['text', 'vision']) {
       const err = this.state.error[src];
       if (!err) continue;

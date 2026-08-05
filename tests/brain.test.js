@@ -305,3 +305,18 @@ test('通道限速隔离：视觉被限速不影响文字，文字被限速不�
   assert.equal(generator.textCalls, 1, '文字不应受视觉限速影响');
   brain.stop();
 });
+
+test('暂停时 retryNow 不发探测请求，恢复后正常', async () => {
+  const { brain, generator } = makeEnv();
+  brain.fail('text', new Error('模拟失败'));
+  const before = generator.textCalls;
+  brain.pause();
+  brain.retryNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, before, '暂停期间不应发探测请求');
+  brain.resume();
+  brain.retryNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, before + 1, '恢复后重试应发请求');
+  brain.stop();
+});

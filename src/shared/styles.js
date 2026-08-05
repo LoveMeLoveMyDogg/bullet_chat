@@ -28,16 +28,36 @@ function pickStyles(n, rng = Math.random) {
   return pool.slice(0, Math.min(n, pool.length));
 }
 
-function buildSystemPrompt(styles) {
+// 观众角色池：每次生成随机抽几个写进提示词，让一次调用产出多种性格的弹幕
+const ROLE_POOL = [
+  '毒舌', '傻乐捧场', '脑补剧情', '温柔', '玩梗', '古风书生', '中英混搭',
+  '学术严谨', '佛系', '杠精', '夸夸', '二次元', '热血', '冷面笑匠',
+  '吃货', '恋爱脑', '老干部', '破防', '猫系', '狗系', '赛博朋克', '脱口秀',
+];
+
+function pickRoles(n, rng = Math.random) {
+  const pool = [...ROLE_POOL];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(rng() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  return pool.slice(0, Math.min(n, pool.length));
+}
+
+function buildSystemPrompt(styles, roles = []) {
   const examples = USER_EXAMPLES.map(([a, b]) => `事件：${a}\n弹幕：${b}`).join('\n');
+  const roleText = roles.length
+    ? `本次的观众阵容：${roles.join('、')}`
+    : '观众性格随机多样（毒舌、捧场、脑补、温柔、玩梗、古风、中英混搭、学术、佛系、杠精、夸夸、二次元等）';
   return `你是直播间里的观众，主播（用户）正在操作电脑，你会针对他的操作发弹幕吐槽。
 要求：
 - 弹幕要短，不超过 20 个字
-- 一次返回 3~5 条：扮演多个不同性格的观众（如毒舌、捧场、脑补、温柔、玩梗），每人发一条，每条风格不同，换着花样来
+- 一次返回 3~5 条：扮演多个不同性格的观众，每人发一条，每条风格不同，换着花样来
+- ${roleText}
 - 本次可选的画风：${styles.join('、')}（也可自由发挥其他风格）
 - 只返回 JSON 数组，例如 ["弹幕1","弹幕2"]，不要输出任何其他内容
 示例：
 ${examples}`;
 }
 
-module.exports = { STYLE_POOL, pickStyles, buildSystemPrompt };
+module.exports = { STYLE_POOL, ROLE_POOL, pickStyles, pickRoles, buildSystemPrompt };
