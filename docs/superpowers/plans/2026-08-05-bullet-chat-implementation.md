@@ -1499,6 +1499,34 @@ test('暂停：pushEntry 不生效', async () => {
   assert.equal(generator.textCalls, 0);
   brain.stop();
 });
+
+test('无错误时成功批次不通知恢复', async () => {
+  const { brain, reporter } = makeEnv();
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(reporter.recovered.length, 0);
+  brain.stop();
+});
+
+test('错误后成功批次恢复并报告正确来源', async () => {
+  const { brain, reporter } = makeEnv();
+  // 在途竞态：批次 1 慢请求在途时，批次 2 快速失败置错；批次 1 成功后经 emitParsed→clearError 恢复
+  let call = 0;
+  brain.generator.chatCompletion = async () => {
+    call++;
+    if (call === 1) return new Promise((r) => setTimeout(() => r('["恢复啦"]'), 40));
+    throw new Error('第二个挂了');
+  };
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create')); // 批次 1：慢请求在途
+  await new Promise((r) => setTimeout(r, 10));
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create')); // 批次 2：快失败置错
+  await new Promise((r) => setTimeout(r, 10));
+  assert.ok(brain.getStatus().error);
+  await new Promise((r) => setTimeout(r, 60)); // 批次 1 成功返回 → 恢复
+  assert.equal(brain.getStatus().error, null);
+  assert.ok(reporter.recovered.includes('text'));
+  brain.stop();
+});
 ```
 
 - [ ] **Step 2: 运行测试确认失败**
@@ -1616,7 +1644,7 @@ class Brain {
         model: this.config.textModel.model,
         system, user,
       });
-      this.emitParsed(raw, 'ai');
+      this.emitParsed(raw);
     } catch (err) {
       this.fail('text', err);
     }
@@ -1633,21 +1661,20 @@ class Brain {
         system,
         imageDataUrl: entry.imageDataUrl,
       });
-      this.emitParsed(raw, 'ai');
+      this.emitParsed(raw);
     } catch (err) {
       this.fail('vision', err);
     }
   }
 
-  emitParsed(raw, source) {
+  emitParsed(raw) {
     const lines = parseDanmakuJson(raw);
     if (lines.length === 0) return;
     this.lastEmit = this.clock();
     for (const line of lines) {
-      this.onDanmaku(line, { source });
+      this.onDanmaku(line, { source: 'ai' });
     }
     if (this.state.error) this.clearError();
-    else this.reporter?.reportRecovered?.(source);
     this.emitStatus();
   }
 
@@ -1666,8 +1693,10 @@ class Brain {
   }
 
   clearError() {
+    // 只在实际错误→成功转换时通知恢复，并报告被记住的错误来源
+    const src = this.state.error ? this.state.error.source : 'text';
     this.state.error = null;
-    this.reporter?.reportRecovered?.('text');
+    this.reporter?.reportRecovered?.(src);
     this.emitStatus();
   }
 
@@ -1707,7 +1736,8 @@ class Brain {
         });
     attempt
       .then(() => {
-        this.reporter?.reportRecovered?.(err.source);
+        // 探测窗口内若又发生新错误（并发批次失败），则不误报恢复
+        if (!this.state.error) this.reporter?.reportRecovered?.(err.source);
         this.emitStatus();
       })
       .catch(() => {
