@@ -17,6 +17,8 @@ contextBridge.exposeInMainWorld('settings', {
   getStatus: () => ipcRenderer.invoke('settings:getStatus'),
   getDisplays: () => ipcRenderer.invoke('settings:getDisplays'),
   getDisplayPreview: (id) => ipcRenderer.invoke('settings:getDisplayPreview', id),
+  getRequestLogs: () => ipcRenderer.invoke('settings:getRequestLogs'),
+  openLogDir: () => ipcRenderer.invoke('settings:openLogDir'),
   onStatus: (cb) => ipcRenderer.on('status-changed', (_e, s) => cb(s)),
 });
 

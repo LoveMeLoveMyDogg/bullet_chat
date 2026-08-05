@@ -16,10 +16,12 @@ function defaultNotify(title, body) {
 }
 
 class ErrorReporter {
-  constructor({ notify = defaultNotify, onStatus, logDir = null }) {
+  constructor({ notify = defaultNotify, onStatus, logDir = null, maxLogBytes = 1024 * 1024, maxLogFiles = 2 }) {
     this.notify = notify;
     this.onStatus = onStatus;
     this.logDir = logDir;
+    this.maxLogBytes = maxLogBytes; // 单日志文件上限，超限轮转（默认 1MB）
+    this.maxLogFiles = maxLogFiles; // 保留归档份数
     this.lastNotified = new Map();
     this.errors = [];
     this.sourceStates = {}; // 来源 -> 'ok' | 'err'（text/vision/watch/screen）
@@ -81,8 +83,24 @@ class ErrorReporter {
     if (!this.logDir) return;
     try {
       fs.mkdirSync(this.logDir, { recursive: true });
-      fs.appendFileSync(path.join(this.logDir, 'app.log'), `${new Date().toISOString()} ${line}\n`);
+      const file = path.join(this.logDir, 'app.log');
+      this.rotateIfNeeded(file);
+      fs.appendFileSync(file, `${new Date().toISOString()} ${line}\n`);
     } catch { /* 日志失败忽略 */ }
+  }
+
+  // 日志超限轮转：app.log → app.log.1 → app.log.2，超出份数的归档删除
+  rotateIfNeeded(file) {
+    let size = 0;
+    try { size = fs.statSync(file).size; } catch { return; } // 文件不存在：无需轮转
+    if (size < this.maxLogBytes) return;
+    try {
+      const one = file + '.1';
+      const two = file + '.2';
+      if (this.maxLogFiles >= 2 && fs.existsSync(two)) fs.rmSync(two);
+      if (this.maxLogFiles >= 1 && fs.existsSync(one)) fs.renameSync(one, two);
+      fs.renameSync(file, one);
+    } catch { /* 轮转失败不影响主流程 */ }
   }
 }
 
