@@ -1,5 +1,5 @@
 const TIMEOUT_MS = 45000; // 视觉模型处理大截图较慢（火山 coding plan 实测可达 30s+），放宽到 45 秒
-const MAX_DANMAKU = 3;
+const MAX_DANMAKU = 5; // 一次调用最多解析条数（多角色弹幕，摊薄单条成本）
 const MAX_LEN = 24;
 
 // 64×64 红色方块（带白边），视觉测试连接用。1×1 像素图部分模型拒绝处理，稍大更容易识别
@@ -137,7 +137,7 @@ async function visionCompletion({ baseUrl, apiKey, model, system, imageDataUrl }
     messages: [
       // 单条 user 消息（含图片），兼容不支持 system+图片的端点
       { role: 'user', content: [
-        { type: 'text', text: `${system}\n请根据这张截图发 1~2 条弹幕吐槽，每条不超过 20 个字。只返回 JSON 数组。` },
+        { type: 'text', text: `${system}\n请根据这张截图发 3~5 条弹幕吐槽：扮演多个不同性格的观众（如毒舌、捧场、脑补、温柔、玩梗），每人发一条，每条不超过 20 个字。只返回 JSON 数组。` },
         { type: 'image_url', image_url: { url: imageDataUrl } },
       ] },
     ],
