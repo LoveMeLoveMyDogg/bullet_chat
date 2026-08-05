@@ -18,7 +18,7 @@ function makeEnv(overrides = {}) {
   };
   const generator = {
     textCalls: 0,
-    chatCompletion: async () => { generator.textCalls++; return '["弹幕1","弹幕2"]'; },
+    chatCompletion: async () => { generator.textCalls++; return '["弹幕1","弹幕2","弹幕3","弹幕4","弹幕5"]'; },
     visionCalls: 0,
     visionCompletion: async () => { generator.visionCalls++; return '["屏幕弹幕"]'; },
   };
@@ -48,27 +48,27 @@ test('typeKey 映射', () => {
   assert.equal(typeKey({ type: 'screen', source: 'screen' }), 'screen');
 });
 
-test('攒批：10 条事件触发一次生成，弹幕≤3 条', async () => {
-  const { brain, danmaku, generator } = makeEnv();
+test('事件风暴：首次补充后缓冲充足，不重复调用', async () => {
+  const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600; // 缓冲不自动吐，保持充足
   for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
-  await new Promise((r) => setTimeout(r, 30));
-  assert.equal(generator.textCalls, 1);
-  assert.equal(danmaku.length, 2);
-  assert.equal(danmaku[0].meta.source, 'ai');
+  await new Promise((r) => setTimeout(r, 40));
+  assert.equal(generator.textCalls, 1, '首次补充一次即可');
+  assert.ok(brain.buffer.length >= 4, 'AI 回复进缓冲池（首条已立即吐出）');
   brain.stop();
 });
 
-test('限速：minIntervalSec 内第二次 flush 被丢弃', async () => {
-  const { brain, danmaku, generator } = makeEnv();
-  const cfg2 = defaultConfig();
-  cfg2.danmaku.minIntervalSec = 3600;
-  brain.refreshConfig(cfg2);
-  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
-  await new Promise((r) => setTimeout(r, 30));
-  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+test('缓冲：补充后缓冲充足，新事件不触发调用', async () => {
+  const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600; // 缓冲不自动吐，保持充足
+  generator.chatCompletion = async () => { generator.textCalls++; return '["1","2","3","4","5"]'; }; // 一次补充 5 条
+  brain.pushEntry(entry('create')); // 首次：缓冲空 → 补充
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(generator.textCalls, 1);
-  assert.equal(danmaku.length, 2);
+  const before = generator.textCalls;
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create')); // 缓冲 5 条 > 阈值 2
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(generator.textCalls, before, '缓冲充足时不应再调 AI');
   brain.stop();
 });
 
@@ -77,7 +77,6 @@ test('change 事件 2 秒内同路径合并为一条描述', async () => {
   let lastUser = '';
   generator.chatCompletion = async ({ user }) => { generator.textCalls++; lastUser = user; return '["x"]'; };
   for (let i = 0; i < 3; i++) brain.pushEntry(entry('change'));
-  brain.flushNow();
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(generator.textCalls, 1);
   assert.equal((lastUser.match(/用户修改了/g) || []).length, 1); // 3 条合并成 1 条
@@ -128,7 +127,6 @@ test('暂停：pushEntry 不生效', async () => {
   const { brain, generator } = makeEnv();
   brain.pause();
   for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
-  brain.flushNow();
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(generator.textCalls, 0);
   brain.stop();
@@ -142,38 +140,40 @@ test('无错误时成功批次不通知恢复', async () => {
   brain.stop();
 });
 
-test('错误后成功批次恢复并报告正确来源', async () => {
-  const { brain, reporter } = makeEnv();
-  // 在途竞态：批次 1 慢请求在途时，批次 2 快速失败置错；批次 1 成功后经 emitParsed→clearError 恢复
-  let call = 0;
-  brain.generator.chatCompletion = async () => {
-    call++;
-    if (call === 1) return new Promise((r) => setTimeout(() => r('["恢复啦"]'), 40));
-    throw new Error('第二个挂了');
-  };
-  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create')); // 批次 1：慢请求在途
-  await new Promise((r) => setTimeout(r, 10));
-  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create')); // 批次 2：快失败置错
-  await new Promise((r) => setTimeout(r, 10));
+test('文字补充失败置错：错误期间不补充，恢复后重新补充', async () => {
+  const { brain, reporter, generator } = makeEnv();
+  let fail = true;
+  generator.chatCompletion = async () => { if (fail) throw new Error('挂了'); return '["1","2","3","4","5"]'; };
+  brain.config.danmaku.minIntervalSec = 3600; // 缓冲保持，便于断言
+  brain.pushEntry(entry('create')); // 首次补充失败
+  await new Promise((r) => setTimeout(r, 30));
   assert.ok(brain.getStatus().error);
-  await new Promise((r) => setTimeout(r, 60)); // 批次 1 成功返回 → 恢复
+  assert.equal(brain.getStatus().error.source, 'text');
+  const before = generator.textCalls;
+  for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 30));
+  assert.equal(generator.textCalls, before, '错误状态期间不补充');
+  fail = false;
+  brain.retryNow();
+  await new Promise((r) => setTimeout(r, 40));
   assert.equal(brain.getStatus().error, null);
   assert.ok(reporter.recovered.includes('text'));
+  assert.ok(brain.buffer.length > 0, '恢复后立即补充缓冲');
   brain.stop();
 });
 
 test('视觉错误不影响文字弹幕', async () => {
   const { brain, danmaku, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600; // 缓冲保持充足，文字只补充一次
   generator.visionCompletion = async () => { throw new Error('视觉挂了'); };
   brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
-  brain.flushNow();
   await new Promise((r) => setTimeout(r, 30));
   assert.ok(brain.getStatus().error);
   assert.equal(brain.getStatus().error.source, 'vision');
   for (let i = 0; i < 10; i++) brain.pushEntry(entry('create'));
   await new Promise((r) => setTimeout(r, 30));
   assert.equal(generator.textCalls, 1); // 文字通道照常生成
-  assert.ok(danmaku.length > 0); // 产出弹幕
+  assert.ok(brain.buffer.length > 0, '弹幕进缓冲池（3600s 节奏下尚未吐出）');
   assert.equal(brain.getStatus().error.source, 'vision'); // 视觉错误保持
   brain.stop();
 });
@@ -189,7 +189,6 @@ test('视觉重试用真实图片', async () => {
     return '["重试成功"]';
   };
   brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
-  brain.flushNow();
   await new Promise((r) => setTimeout(r, 30));
   assert.ok(brain.getStatus().error);
   assert.equal(brain.getStatus().error.source, 'vision');
@@ -202,14 +201,14 @@ test('视觉重试用真实图片', async () => {
 
 test('混合批次：屏幕条目与文件条目拆批，视觉用真实截图', async () => {
   const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600; // 缓冲保持充足，文字只补充一次
   let visionImage = null;
   let lastTextUser = '';
   generator.visionCompletion = async ({ imageDataUrl }) => { visionImage = imageDataUrl; return '["屏幕弹"]'; };
-  generator.chatCompletion = async ({ user }) => { generator.textCalls++; lastTextUser = user; return '["文件弹"]'; };
+  generator.chatCompletion = async ({ user }) => { generator.textCalls++; lastTextUser = user; return '["文件弹1","文件弹2","文件弹3","文件弹4","文件弹5"]'; };
   // 队列：5 个文件条目在前，1 个屏幕条目在后（模拟真实混合）
   for (let i = 0; i < 5; i++) brain.pushEntry(entry('create'));
   brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,REALSCREEN' });
-  brain.flushNow();
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(visionImage, 'data:image/jpeg;base64,REALSCREEN'); // 不再是 undefined
   assert.ok(!lastTextUser.includes('屏幕'), '文字批次不应包含屏幕条目描述');
@@ -258,33 +257,45 @@ test('describeEntry 内容开关与事件类型控制', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
-test('时间窗：超过 maxEventAgeSec 的积压事件被丢弃', async () => {
-  let fakeNow = 1000000;
-  const { brain, danmaku, generator } = makeEnv({ clock: () => fakeNow });
-  brain.pushEntry(entry('create')); // ts = 1000000
-  fakeNow += 3 * 60 * 1000;         // 3 分钟后（超过默认 120s 窗口）
-  brain.pushEntry(entry('create')); // ts = 1180000，窗口内
-  await new Promise((r) => setTimeout(r, 40));
-  assert.equal(generator.textCalls, 1, '旧事件应被丢弃，只发送新事件');
-  assert.equal(danmaku.length, 2);
-  brain.stop();
-});
-
-test('时间窗：maxEventAgeSec=0 时旧事件不过滤', async () => {
+test('时间窗：补充调用时超龄事件被过滤', async () => {
   let fakeNow = 1000000;
   let sentUser = '';
   const gen = {
-    chatCompletion: async ({ user }) => { sentUser = user; return '["a"]'; },
-    visionCompletion: async () => '["b"]',
+    chatCompletion: async ({ user }) => { sentUser = user; return '["1","2","3","4","5"]'; },
+    visionCompletion: async () => '["v"]',
   };
-  const { brain, generator } = makeEnv({ generator: gen, clock: () => fakeNow });
-  brain.refreshConfig(defaultConfig()); // 默认 maxEventAgeSec=120——先设 0
-  brain.config.danmaku.maxEventAgeSec = 0;
+  const { brain } = makeEnv({ generator: gen, clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600; // 缓冲不自动吐
+  brain.pushEntry(entry('create')); // 首次补充：buffer 5 条
+  await new Promise((r) => setTimeout(r, 20));
+  brain.pushEntry(entry('create')); // 事件 A 进内容池（缓冲充足不补充）
+  fakeNow += 3 * 60 * 1000;         // 3 分钟后：A 超龄
+  brain.buffer.length = 0;          // 模拟缓冲耗尽
+  brain.pushEntry(entry('delete')); // 事件 B 触发补充
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(sentUser.split('\n').length, 1, '超龄事件 A 被过滤，只发新事件 B');
+  assert.ok(sentUser.includes('删除'));
+  brain.stop();
+});
+
+test('时间窗：maxEventAgeSec=0 时超龄事件不过滤', async () => {
+  let fakeNow = 1000000;
+  let sentUser = '';
+  const gen = {
+    chatCompletion: async ({ user }) => { sentUser = user; return '["1","2","3","4","5"]'; },
+    visionCompletion: async () => '["v"]',
+  };
+  const { brain } = makeEnv({ generator: gen, clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.maxEventAgeSec = 0; // 不限时
   brain.pushEntry(entry('create'));
-  fakeNow += 10 * 60 * 1000; // 10 分钟后的事件
-  brain.pushEntry(entry('create'));
-  await new Promise((r) => setTimeout(r, 40));
-  assert.ok(sentUser.split('\n').length >= 2, '两条事件都应发送（不过滤）');
+  await new Promise((r) => setTimeout(r, 20));
+  brain.pushEntry(entry('create')); // 事件 A
+  fakeNow += 10 * 60 * 1000;        // 10 分钟后
+  brain.buffer.length = 0;
+  brain.pushEntry(entry('delete')); // 事件 B
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(sentUser.split('\n').length, 2, 'maxEventAgeSec=0 时新旧事件都发送');
   brain.stop();
 });
 

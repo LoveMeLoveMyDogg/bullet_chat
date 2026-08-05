@@ -35,5 +35,5 @@ test('pickRoles 返回来自池子的不重复子集', () => {
 test('buildSystemPrompt 含随机角色阵容', () => {
   const p = buildSystemPrompt(['阴阳怪气损友'], ['毒舌', '猫系', '恋爱脑']);
   assert.ok(p.includes('毒舌、猫系、恋爱脑'));
-  assert.ok(p.includes('3~5 条'));
+  assert.ok(p.includes('8~10 条'));
 });

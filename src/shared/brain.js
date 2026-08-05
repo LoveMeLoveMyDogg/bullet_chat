@@ -7,6 +7,7 @@ const fs = require('node:fs');
 const BATCH_SIZE = 10;
 const COALESCE_MS = 2000;
 const RETRY_MS = 60000;
+const REFILL_THRESHOLD = 2; // 缓冲剩余 ≤2 条时触发补充（提前量覆盖一次 API 调用耗时）
 const MAX_READ_BYTES = 50 * 1024;   // 超过此大小不读内容（大文件/构建产物）
 const MAX_CONTENT_CHARS = 200;      // 内容片段最长字符数
 const BINARY_PROBE = 4096;          // 二进制检测采样长度
@@ -64,9 +65,16 @@ class Brain {
     this.rng = rng;
     this.onDanmaku = onDanmaku;
     this.onStatus = onStatus;
-    this.queue = [];
+    this.queue = [];          // 文字事件内容池（最近事件，供补充调用使用）
+    this.visionQueue = [];    // 视觉事件（变化驱动 + 限速）
+    this.buffer = [];         // 文字弹幕缓冲池：AI 一次回复多条，按节奏逐条吐出
+    this.refilling = false;   // 补充调用进行中标记（防并发补充）
+    this.lastRefillAt = 0;    // 上次补充时间（补充节流）
+    this.lastEmitAt = 0;      // 上次吐出弹幕时间（首次补充后立即吐出）
+    this.refillTimer = null;  // 延迟补充检查定时器
+    this.emitTimer = null;    // 弹幕吐出定时器
     this.changeSeen = new Map(); // path -> lastChangeTime
-    this.lastTextEmit = 0;   // 文字弹幕最后发送时间（本地模式与文字 AI 共用）
+    this.lastTextEmit = 0;   // 本地模式弹幕最后发送时间
     this.lastVisionEmit = 0; // 视觉弹幕最后发送时间（独立限速，避免视觉高频烧额度）
     this.batchTimer = null;
     this.retryTimer = null;
@@ -76,7 +84,6 @@ class Brain {
 
   start() {
     this.state.mode = 'running';
-    this.scheduleBatch();
     this.scheduleRetry();
     this.emitStatus();
   }
@@ -84,6 +91,10 @@ class Brain {
   stop() {
     clearTimeout(this.batchTimer);
     clearTimeout(this.retryTimer);
+    clearTimeout(this.refillTimer);
+    this.refillTimer = null;
+    clearTimeout(this.emitTimer);
+    this.emitTimer = null;
     this.state.mode = 'idle';
   }
 
@@ -103,15 +114,15 @@ class Brain {
       return;
     }
     entry.ts = this.clock(); // 记录到达时间，供时间窗过滤（积压的旧事件不再播报）
-    this.queue.push(entry);
-    if (this.queue.length >= BATCH_SIZE) this.flushNow();
-  }
-
-  scheduleBatch() {
-    this.batchTimer = setTimeout(() => {
-      this.flushNow();
-      this.scheduleBatch();
-    }, this.config.danmaku.batchIntervalMs);
+    if (entry.source === 'screen') {
+      // 视觉：变化驱动 + 限速（画面弹幕需要实时性，不缓冲）
+      this.visionQueue.push(entry);
+      this.flushVision();
+    } else {
+      // 文字：进内容池，缓冲不足时才补充调用（弹幕能续上就不打扰 AI）
+      this.queue.push(entry);
+      this.maybeRefill();
+    }
   }
 
   scheduleRetry() {
@@ -119,28 +130,75 @@ class Brain {
       this.retryNow();
       this.scheduleRetry();
     }, RETRY_MS);
+    this.retryTimer.unref?.(); // 定时器不阻止进程退出（应用有窗口常驻，无影响）
   }
 
-  flushNow() {
-    if (this.queue.length === 0) return;
+  // 文字弹幕补充：缓冲剩余 ≤ REFILL_THRESHOLD 且内容池有新事件时才调 AI。
+  // 补充节流：距上次补充不足 batchIntervalMs 时安排延迟检查，让事件风暴攒批后再调用
+  maybeRefill() {
+    if (this.state.paused || this.refilling || this.state.error.text) return;
+    if (this.buffer.length > REFILL_THRESHOLD) return;
     const now = this.clock();
-    // 时间窗过滤：只播报最近 maxEventAgeSec 秒内的改动（弹幕是直播体验，队列积压的旧事件丢弃）
+    if (this.lastRefillAt && now - this.lastRefillAt < this.config.danmaku.batchIntervalMs) {
+      if (!this.refillTimer) {
+        const wait = this.config.danmaku.batchIntervalMs - (now - this.lastRefillAt);
+        this.refillTimer = setTimeout(() => {
+          this.refillTimer = null;
+          this.maybeRefill();
+        }, Math.max(0, wait));
+        this.refillTimer.unref?.();
+      }
+      return;
+    }
+    // 时间窗过滤：只播报最近 maxEventAgeSec 秒内的改动（积压的旧事件丢弃）
     const maxAgeMs = (this.config.danmaku.maxEventAgeSec || 0) * 1000;
     if (maxAgeMs > 0) {
       this.queue = this.queue.filter((e) => now - (e.ts || now) <= maxAgeMs);
       if (this.queue.length === 0) return;
     }
     const batch = this.queue.splice(0, BATCH_SIZE);
-    // 按来源拆批：屏幕条目走视觉、文件条目走文字，互不混串
-    const fileEntries = batch.filter((e) => e.source !== 'screen');
-    const screenEntries = batch.filter((e) => e.source === 'screen');
-    // 文字/视觉各自限速：一通道被限速不影响另一通道（视觉默认 10 秒，防高频烧额度）
-    if (fileEntries.length && !this.state.error.text && now - this.lastTextEmit >= this.config.danmaku.minIntervalSec * 1000) {
-      this.generateText(fileEntries);
+    if (batch.length === 0) return;
+    this.lastRefillAt = now;
+    this.refilling = true;
+    this.generateText(batch).finally(() => {
+      this.refilling = false;
+      this.maybeRefill(); // 补充完成后再检查（内容池可能又有新事件且缓冲仍不足）
+    });
+  }
+
+  // 视觉通道：攒批 + 独立限速（一通道被限速不影响另一通道）
+  flushVision() {
+    if (this.visionQueue.length === 0) return;
+    const now = this.clock();
+    const maxAgeMs = (this.config.danmaku.maxEventAgeSec || 0) * 1000;
+    if (maxAgeMs > 0) {
+      this.visionQueue = this.visionQueue.filter((e) => now - (e.ts || now) <= maxAgeMs);
+      if (this.visionQueue.length === 0) return;
     }
-    if (screenEntries.length && !this.state.error.vision && now - this.lastVisionEmit >= this.config.danmaku.minIntervalVisionSec * 1000) {
-      this.generateVision(screenEntries);
-    }
+    const batch = this.visionQueue.splice(0, BATCH_SIZE);
+    if (this.state.error.vision) return;
+    if (now - this.lastVisionEmit < this.config.danmaku.minIntervalVisionSec * 1000) return;
+    this.generateVision(batch);
+  }
+
+  // 弹幕吐出：按 minIntervalSec 节奏从缓冲逐条发；补充后第一条立即出（不等满间隔）
+  scheduleEmit() {
+    if (this.emitTimer || this.state.paused) return;
+    const sinceLast = this.lastEmitAt ? this.clock() - this.lastEmitAt : Infinity;
+    const delay = Math.max(0, this.config.danmaku.minIntervalSec * 1000 - sinceLast);
+    this.emitTimer = setTimeout(() => {
+      this.emitTimer = null;
+      const text = this.buffer.shift();
+      if (text === undefined) {
+        this.maybeRefill(); // 缓冲空了：看内容池是否需要补充
+        return;
+      }
+      this.lastEmitAt = this.clock();
+      this.onDanmaku(text, { source: 'ai' });
+      if (this.buffer.length) this.scheduleEmit();
+      else this.maybeRefill();
+    }, delay);
+    this.emitTimer.unref?.();
   }
 
   async generateText(batch) {
@@ -154,7 +212,14 @@ class Brain {
         system, user,
       });
       this.logger?.logRequest({ channel: 'text', input: user, reply: raw });
-      this.emitParsed(raw, 'text');
+      // 缓冲模式：解析结果全部进缓冲池，按节奏吐出（不立即全发）
+      const lines = parseDanmakuJson(raw);
+      if (lines.length) {
+        this.buffer.push(...lines);
+        this.scheduleEmit();
+      }
+      if (this.state.error.text) this.clearError('text');
+      this.emitStatus();
     } catch (err) {
       this.logger?.logRequest({ channel: 'text', input: user, error: err.message });
       this.fail('text', err);
@@ -181,13 +246,12 @@ class Brain {
     }
   }
 
+  // 视觉弹幕：直接发送（画面弹幕实时性优先）
   emitParsed(raw, src) {
     const lines = parseDanmakuJson(raw);
     if (lines.length === 0) return;
-    if (src === 'vision') this.lastVisionEmit = this.clock();
-    else this.lastTextEmit = this.clock();
+    this.lastVisionEmit = this.clock();
     for (const line of lines) {
-      // meta.source 接口约定为 'ai'|'local'
       this.onDanmaku(line, { source: 'ai' });
     }
     if (this.state.error[src]) this.clearError(src);
@@ -218,11 +282,18 @@ class Brain {
   setLocalMode(on) {
     this.state.localMode = !!on;
     this.queue.length = 0;
+    this.buffer.length = 0; // 切换本地模式：清掉 AI 缓冲，避免混发
+    clearTimeout(this.emitTimer);
+    this.emitTimer = null;
     this.emitStatus();
   }
 
   pause() { this.state.paused = true; this.emitStatus(); }
-  resume() { this.state.paused = false; this.emitStatus(); }
+  resume() {
+    this.state.paused = false;
+    if (this.buffer.length) this.scheduleEmit(); // 恢复后继续吐缓冲
+    this.emitStatus();
+  }
   getStatus() {
     // 对外保持旧形状：null 或 { source, message, at }
     const error = this.state.error.text || this.state.error.vision || null;
@@ -258,7 +329,10 @@ class Brain {
       attempt
         .then(() => {
           // 重试窗口期内若该来源已发生新的失败（错误对象被替换），不误报恢复
-          if (this.state.error[src] === err) this.clearError(src);
+          if (this.state.error[src] === err) {
+            this.clearError(src);
+            if (src === 'text') this.maybeRefill(); // 恢复后立即补充缓冲
+          }
         })
         .catch(() => {
           // 仍失败，恢复该来源错误状态等下一次重试；不触碰其他来源的状态
