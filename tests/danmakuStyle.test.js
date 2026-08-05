@@ -40,3 +40,18 @@ test('durationFor 倍速缩放与兜底', () => {
   assert.equal(durationFor('fly', 0), 9000); // 0（非法）回退 1x
   assert.equal(durationFor('fly', 0.1), 90000); // 极慢：0.1 下限生效
 });
+
+const { laneTopFor } = require('../src/shared/danmakuStyle');
+
+test('laneTopFor 三种位置与默认', () => {
+  // 顶部（默认）：固定从 6 开始，间距 78
+  assert.equal(laneTopFor('top', 0, 6, 600), 6);
+  assert.equal(laneTopFor('top', 2, 6, 600), 6 + 2 * 78);
+  assert.equal(laneTopFor(undefined, 1, 6, 600), 6 + 78); // 未知值回退顶部
+  // 中间：垂直居中（(600 - 6*78)/2 = 66）
+  assert.equal(laneTopFor('middle', 0, 6, 600), 66);
+  assert.ok(laneTopFor('middle', 0, 6, 600) >= 6);
+  // 全屏：均匀分布
+  assert.equal(laneTopFor('full', 0, 6, 600), 6);
+  assert.equal(laneTopFor('full', 3, 6, 600), Math.round(600 / 6 * 3) + 6);
+});

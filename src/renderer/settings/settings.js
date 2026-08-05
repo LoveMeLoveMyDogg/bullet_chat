@@ -19,6 +19,9 @@ async function load() {
   $('dm-max').value = config.danmaku.maxConcurrent;
   $('dm-local').checked = config.danmaku.localMode;
   $('dm-read-content').checked = config.danmaku.readFileContent;
+  for (const rb of document.querySelectorAll('input[name=dm-position]')) {
+    rb.checked = rb.value === config.danmaku.position;
+  }
   $('dm-styles').value = config.danmaku.styles.join(',');
   // 外观
   $('dm-fs-min').value = config.danmaku.fontSizeMin;
@@ -177,6 +180,8 @@ $('btn-save').onclick = async () => {
   config.danmaku.maxConcurrent = Math.min(12, Math.max(1, Number($('dm-max').value) || 6));
   config.danmaku.localMode = $('dm-local').checked;
   config.danmaku.readFileContent = $('dm-read-content').checked;
+  const checkedPos = document.querySelector('input[name=dm-position]:checked');
+  config.danmaku.position = checkedPos ? checkedPos.value : 'top';
   config.danmaku.styles = $('dm-styles').value.split(',').map((s) => s.trim()).filter(Boolean);
   // 外观：字号范围（min<=max 校正）、颜色列表、倍速、动画勾选
   config.danmaku.fontSizeMin = Math.max(0, Math.min(100, Number($('dm-fs-min').value) || 30));

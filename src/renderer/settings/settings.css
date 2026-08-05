@@ -17,6 +17,8 @@ button:disabled { background: #666; cursor: default; }
 #mask-canvas { border: 1px solid #555; background: #111; cursor: crosshair; max-width: 100%; }
 footer { margin-top: 18px; padding-top: 10px; border-top: 1px solid #444; }
 .hint { font-size: 12px; color: #999; }
+.label-row { display: flex; align-items: center; gap: 4px; margin: 6px 0; font-size: 13px; }
+.label-row label { display: inline-flex; align-items: center; margin: 0 6px 0 0; }
 .privacy-note { font-size: 12px; color: #ffd54f; background: #3a2f00; border: 1px solid #665800; border-radius: 4px; padding: 8px 10px; margin: 10px 0; line-height: 1.6; }
 .req-log { max-height: 320px; overflow-y: auto; border: 1px solid #444; border-radius: 4px; padding: 8px; background: #16161f; }
 .req-item { border-bottom: 1px solid #333; padding: 6px 0; font-size: 12px; }

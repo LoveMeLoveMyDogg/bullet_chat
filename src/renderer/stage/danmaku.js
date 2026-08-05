@@ -1,15 +1,16 @@
 // 渲染层无 nodeIntegration：样式纯逻辑经 preload 暴露的 window.danmakuStyle 使用
 const ds = window.danmakuStyle;
-let config = { maxConcurrent: 6, fontSizeMin: 30, fontSizeMax: 39, colors: [], speed: 1, animations: [] };
+let config = { maxConcurrent: 6, fontSizeMin: 30, fontSizeMax: 39, colors: [], speed: 1, animations: [], position: 'top' };
 
 function buildLanes() {
   const lanesEl = document.getElementById('lanes');
   lanesEl.innerHTML = '';
   config.lanes = [];
+  const viewportH = window.innerHeight;
   for (let i = 0; i < config.maxConcurrent; i++) {
     const lane = document.createElement('div');
     lane.className = 'lane';
-    lane.style.top = (6 + i * 78) + 'px';
+    lane.style.top = ds.laneTopFor(config.position, i, config.maxConcurrent, viewportH) + 'px';
     lanesEl.appendChild(lane);
     config.lanes.push({ el: lane, busy: false });
   }
@@ -44,10 +45,11 @@ function show(text, meta = {}) {
 }
 
 window.api.onStageConfig((cfg) => {
-  // 仅轨道数变化时重建（否则清空在途弹幕）
+  // 仅轨道数或位置变化时重建（否则清空在途弹幕）
   const maxChanged = cfg.maxConcurrent !== undefined && cfg.maxConcurrent !== config.maxConcurrent;
+  const posChanged = cfg.position !== undefined && cfg.position !== config.position;
   config = { ...config, ...cfg };
-  if (maxChanged) buildLanes();
+  if (maxChanged || posChanged) buildLanes();
 });
 window.api.getStageConfig().then((cfg) => { config = { ...config, ...cfg }; buildLanes(); }).catch(() => {});
 window.api.onDanmaku(({ text, meta }) => show(text, meta));

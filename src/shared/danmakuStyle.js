@@ -33,4 +33,20 @@ function durationFor(anim, speed = 1) {
   return Math.max(300, Math.round(base / s));
 }
 
-module.exports = { BASE_DURATIONS, DEFAULT_COLOR, pickFontSize, pickColor, pickAnimation, durationFor };
+// 弹幕轨道垂直位置：top=顶部 / middle=垂直居中 / full=全屏均匀分布（未知值回退顶部）
+const LANE_TOP = 6;  // 顶部起始偏移
+const LANE_H = 78;   // 轨道间距
+function laneTopFor(position, index, maxConcurrent, viewportH) {
+  const n = Math.max(1, maxConcurrent || 6);
+  const h = viewportH || 600;
+  if (position === 'middle') {
+    const area = Math.max(0, h - n * LANE_H);
+    return Math.max(LANE_TOP, Math.round(area / 2) + index * LANE_H);
+  }
+  if (position === 'full') {
+    return Math.round((h / n) * index) + LANE_TOP;
+  }
+  return LANE_TOP + index * LANE_H; // top（默认）
+}
+
+module.exports = { BASE_DURATIONS, DEFAULT_COLOR, pickFontSize, pickColor, pickAnimation, durationFor, laneTopFor, LANE_TOP, LANE_H };
