@@ -23,9 +23,31 @@ let reporter = null;
 let config = null;
 let paused = false;
 let demoHandle = null;
+let screenWatcher = null;
+let processor = null;
 
 function notify(title, body) {
   try { new Notification({ title, body }).show(); } catch { /* 忽略 */ }
+}
+
+// 屏幕事件源：启动与保存都走 applyConfig，故必须声明在模块作用域（applyConfig 也是模块级），
+// 若声明在 whenReady 回调内，模块级 applyConfig 按词法作用域找不到它 → ReferenceError
+function applyScreenWatcher() {
+  if (screenWatcher) screenWatcher.stop();
+  if (!config.visionModel.enabled) return;
+  if (!config.visionModel.baseUrl || !config.visionModel.apiKey || !config.visionModel.model) {
+    // 未配置完整：普通提示，不进入错误状态（文件弹幕照常）
+    notify('BulletChat', '视觉模型未配置完整，屏幕弹幕未启用（文件弹幕不受影响）');
+    return;
+  }
+  screenWatcher = new ScreenWatcher({
+    config,
+    getMasks: () => config.monitor.masks,
+    onEntry: (entry) => brain?.pushEntry(entry),
+    onError: (err) => reporter?.reportError('screen', err),
+    processor,
+  });
+  screenWatcher.start();
 }
 
 function applyConfig(saved, { silent = false } = {}) {
@@ -81,29 +103,11 @@ if (!gotLock) {
     });
 
     // 图像处理器（隐藏窗口 + canvas，渲染层无 require，走 preload 暴露的 window.processor）
-    const processor = new ImageProcessor({ preloadPath: PRELOAD });
+    processor = new ImageProcessor({ preloadPath: PRELOAD });
     processor.init().catch((err) => reporter.reportError('screen', err));
     ipcMain.on('process:resolve', (_e, { id, dataUrl }) => processor.resolve(id, dataUrl));
     ipcMain.on('process:error', (_e, { id, message }) => processor.reject(id, new Error(message)));
 
-    let screenWatcher = null;
-    function applyScreenWatcher() {
-      if (screenWatcher) screenWatcher.stop();
-      if (!config.visionModel.enabled) return;
-      if (!config.visionModel.baseUrl || !config.visionModel.apiKey || !config.visionModel.model) {
-        // 未配置完整：普通提示，不进入错误状态（文件弹幕照常）
-        notify('BulletChat', '视觉模型未配置完整，屏幕弹幕未启用（文件弹幕不受影响）');
-        return;
-      }
-      screenWatcher = new ScreenWatcher({
-        config,
-        getMasks: () => config.monitor.masks,
-        onEntry: (entry) => brain?.pushEntry(entry),
-        onError: (err) => reporter?.reportError('screen', err),
-        processor,
-      });
-      screenWatcher.start();
-    }
     stage = new Stage({ preloadPath: PRELOAD });
     stage.start();
     stage.updateConfig(config.danmaku);
