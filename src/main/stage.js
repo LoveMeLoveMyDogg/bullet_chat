@@ -34,6 +34,7 @@ class Stage {
         preload: this.preloadPath,
         contextIsolation: true,
         nodeIntegration: false,
+        sandbox: false, // preload 需要 require 本地共享模块（danmakuStyle）
       },
     });
     win.setAlwaysOnTop(true, 'screen-saver');

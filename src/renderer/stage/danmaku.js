@@ -1,6 +1,6 @@
-const COLORS = ['#fff', '#ffd700', '#7cfc00', '#00e5ff', '#ff69b4', '#ffa500', '#b388ff', '#ff5252'];
-const ANIMS = ['anim-fly', 'anim-drop', 'anim-pop', 'anim-shake'];
-let config = { maxConcurrent: 6, animationsEnabled: true };
+// 渲染层无 nodeIntegration：样式纯逻辑经 preload 暴露的 window.danmakuStyle 使用
+const ds = window.danmakuStyle;
+let config = { maxConcurrent: 6, fontSizeMin: 30, fontSizeMax: 39, colors: [], speed: 1, animations: [] };
 
 function buildLanes() {
   const lanesEl = document.getElementById('lanes');
@@ -26,19 +26,28 @@ function show(text, meta = {}) {
   lane.busy = true;
   const el = document.createElement('div');
   el.className = 'danmaku';
-  if (config.animationsEnabled) el.classList.add(ANIMS[Math.floor(Math.random() * ANIMS.length)]);
   el.textContent = text;
-  el.style.color = COLORS[Math.floor(Math.random() * COLORS.length)];
-  el.style.fontSize = (meta.source === 'local' ? 26 : 30 + Math.floor(Math.random() * 10)) + 'px';
-  if (!config.animationsEnabled) el.style.left = '20px';
+  // 外观：字号范围 / 颜色列表 / 动画池 / 倍速（来自设置页）
+  el.style.fontSize = ds.pickFontSize(config.fontSizeMin, config.fontSizeMax) + 'px';
+  el.style.color = ds.pickColor(config.colors);
+  const anim = ds.pickAnimation(config.animations);
+  if (anim) {
+    el.classList.add('anim-' + anim);
+    el.style.animationDuration = ds.durationFor(anim, config.speed) / 1000 + 's';
+  } else {
+    el.style.left = '20px'; // 动画全关：静止显示
+  }
   lane.el.appendChild(el);
-  const duration = 9000;
+  // 移除时长与动画时长对齐（防中途截断），静态弹幕 8 秒
+  const duration = anim ? ds.durationFor(anim, config.speed) : 8000;
   setTimeout(() => { el.remove(); lane.busy = false; }, duration);
 }
 
 window.api.onStageConfig((cfg) => {
+  // 仅轨道数变化时重建（否则清空在途弹幕）
+  const maxChanged = cfg.maxConcurrent !== undefined && cfg.maxConcurrent !== config.maxConcurrent;
   config = { ...config, ...cfg };
-  buildLanes();
+  if (maxChanged) buildLanes();
 });
 window.api.getStageConfig().then((cfg) => { config = { ...config, ...cfg }; buildLanes(); }).catch(() => {});
 window.api.onDanmaku(({ text, meta }) => show(text, meta));

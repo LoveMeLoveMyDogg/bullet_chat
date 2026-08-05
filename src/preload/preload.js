@@ -1,4 +1,7 @@
 const { contextBridge, ipcRenderer } = require('electron');
+const danmakuStyle = require('../shared/danmakuStyle');
+
+contextBridge.exposeInMainWorld('danmakuStyle', danmakuStyle);
 
 contextBridge.exposeInMainWorld('api', {
   onDanmaku: (cb) => ipcRenderer.on('danmaku', (_e, payload) => cb(payload)),

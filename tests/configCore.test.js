@@ -21,6 +21,23 @@ test('defaultConfig 返回独立副本', () => {
   assert.equal(defaultConfig().danmaku.minIntervalSec, 10);
 });
 
+test('弹幕外观默认值', () => {
+  const d = defaultConfig().danmaku;
+  assert.equal(d.fontSizeMin, 30);
+  assert.equal(d.fontSizeMax, 39);
+  assert.deepEqual(d.colors, []);
+  assert.equal(d.speed, 1);
+  assert.deepEqual(d.animations, ['fly']); // 默认只保留横飘
+  assert.equal(d.animationsEnabled, undefined); // 旧键已移除
+});
+
+test('旧配置 animationsEnabled 被迁移丢弃并回退新默认', () => {
+  const merged = mergeConfig(defaultConfig(), { danmaku: { animationsEnabled: true } });
+  assert.equal(merged.danmaku.animationsEnabled, undefined);
+  assert.deepEqual(merged.danmaku.animations, ['fly']);
+  assert.equal(merged.danmaku.fontSizeMin, 30);
+});
+
 test('mergeConfig 只保留已知键', () => {
   const merged = mergeConfig(defaultConfig(), {
     textModel: { model: 'deepseek-reasoner' },

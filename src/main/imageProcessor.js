@@ -15,7 +15,7 @@ class ImageProcessor {
     if (this.win && !this.win.isDestroyed()) return;
     this.win = new BrowserWindow({
       show: false,
-      webPreferences: { preload: this.preloadPath, contextIsolation: true, nodeIntegration: false },
+      webPreferences: { preload: this.preloadPath, contextIsolation: true, nodeIntegration: false, sandbox: false },
     });
     await this.win.loadFile(path.join(__dirname, '..', 'renderer', 'processor', 'processor.html'));
   }
