@@ -520,7 +520,7 @@ function formatEventDescription(entry) {
     case 'rename':
       return `用户把文件改名成「${name}」${loc}`;
     case 'move':
-      return `用户把「${name}」移动到了${loc}`;
+      return `用户把「${name}」移动到了${entry.drive || ''}`;
     case 'change':
       return `用户修改了「${name}」${loc}`;
     case 'screen':
