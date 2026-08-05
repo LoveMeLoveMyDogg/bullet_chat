@@ -822,7 +822,7 @@ test('buildSystemPrompt 包含风格与 JSON 要求与示例', () => {
   const p = buildSystemPrompt(['阴阳怪气损友']);
   assert.ok(p.includes('阴阳怪气损友'));
   assert.ok(p.includes('JSON'));
-  assert.ok(p.includes('新建文件夹不改名字吗'));
+  assert.ok(p.includes('新建了文件夹不改名字吗'));
 });
 ```
 
