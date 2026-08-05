@@ -16,3 +16,9 @@ contextBridge.exposeInMainWorld('settings', {
   getDisplayPreview: (id) => ipcRenderer.invoke('settings:getDisplayPreview', id),
   onStatus: (cb) => ipcRenderer.on('status-changed', (_e, s) => cb(s)),
 });
+
+contextBridge.exposeInMainWorld('processor', {
+  onProcess: (cb) => ipcRenderer.on('process:image', (_e, payload) => cb(payload)),
+  resolveProcess: (id, dataUrl) => ipcRenderer.send('process:resolve', { id, dataUrl }),
+  errorProcess: (id, message) => ipcRenderer.send('process:error', { id, message }),
+});

@@ -10,6 +10,8 @@ const { testTextConnection, testVisionConnection } = require('./generator');
 const { Stage } = require('./stage');
 const { ErrorReporter, sourceLabel } = require('./errorReporter');
 const { createSettingsWindow, registerSettingsIpc } = require('./settingsWindow');
+const { ScreenWatcher } = require('./screenWatcher');
+const { ImageProcessor } = require('./imageProcessor');
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'preload.js');
 
@@ -43,6 +45,8 @@ function applyConfig(saved, { silent = false } = {}) {
   // 配置保存后立即重试
   if (brain && brain.getStatus().error) brain.retryNow();
   if (!silent) notify('BulletChat', '配置已应用');
+  // 屏幕事件源（启动与保存都走 applyConfig）
+  applyScreenWatcher();
 }
 
 const gotLock = app.requestSingleInstanceLock();
@@ -73,6 +77,32 @@ if (!gotLock) {
       reporter,
       onDanmaku: (text, meta) => stage?.send(text, meta),
     });
+
+    // 图像处理器（隐藏窗口 + canvas，渲染层无 require，走 preload 暴露的 window.processor）
+    const processor = new ImageProcessor({ preloadPath: PRELOAD });
+    processor.init().catch((err) => reporter.reportError('screen', err));
+    ipcMain.on('process:resolve', (_e, { id, dataUrl }) => processor.resolve(id, dataUrl));
+    ipcMain.on('process:error', (_e, { id, message }) => processor.reject(id, new Error(message)));
+
+    let screenWatcher = null;
+    function applyScreenWatcher() {
+      if (screenWatcher) screenWatcher.stop();
+      if (!config.visionModel.enabled) return;
+      if (!config.visionModel.baseUrl || !config.visionModel.apiKey || !config.visionModel.model) {
+        // 未配置完整：普通提示，不进入错误状态（文件弹幕照常）
+        notify('BulletChat', '视觉模型未配置完整，屏幕弹幕未启用（文件弹幕不受影响）');
+        return;
+      }
+      screenWatcher = new ScreenWatcher({
+        config,
+        getMasks: () => config.monitor.masks,
+        onEntry: (entry) => brain?.pushEntry(entry),
+        onError: (err) => reporter?.reportError('screen', err),
+        processor,
+      });
+      screenWatcher.start();
+    }
+    applyScreenWatcher();
 
     stage = new Stage({ preloadPath: PRELOAD });
     stage.start();
