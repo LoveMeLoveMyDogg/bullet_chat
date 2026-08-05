@@ -19,14 +19,16 @@ function pixelDiffRatio(a, b) {
 }
 
 class ScreenWatcher {
-  constructor({ config, getMasks, onEntry, onError, processor }) {
+  constructor({ config, getMasks, onEntry, onError, onRecovered, processor }) {
     this.config = config;
     this.getMasks = getMasks;
     this.onEntry = onEntry;
     this.onError = onError;
+    this.onRecovered = onRecovered;
     this.processor = processor;
     this.timer = null;
     this.ticking = false;
+    this.hadError = false; // 上一轮 tick 是否出错（成功一轮后上报恢复）
     this.last = new Map(); // display_id -> { bits }
   }
 
@@ -45,6 +47,7 @@ class ScreenWatcher {
   async tick() {
     if (this.ticking) return;
     this.ticking = true;
+    let ok = false;
     try {
       const sources = await desktopCapturer.getSources({
         types: ['screen'],
@@ -74,10 +77,17 @@ class ScreenWatcher {
           imageDataUrl: dataUrl,
         });
       }
+      ok = true;
     } catch (err) {
       this.onError?.(new Error(`屏幕识别失败：${err.message}`));
+      this.hadError = true;
     } finally {
       this.ticking = false;
+    }
+    // 本轮成功完成且上一轮出错：上报恢复
+    if (ok && this.hadError) {
+      this.hadError = false;
+      this.onRecovered?.();
     }
   }
 

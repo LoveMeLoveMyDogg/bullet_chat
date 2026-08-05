@@ -14,26 +14,26 @@ function listFixedDrives() {
 
 function classifyEntry(root, full, eventType) {
   const name = path.basename(full);
-  let isDir = false;
   if (eventType === 'change') {
     return { source: 'file', type: 'change', name, path: full, drive: root.slice(0, 2), isDir: false };
   }
   // fs.watch 的 rename 事件：存在 → 新建，不存在 → 删除（改名表现为删除+新建两条，可接受）
-  let exists = false;
-  try { exists = fs.statSync(full); } catch { exists = false; }
-  if (exists) {
-    try { isDir = fs.statSync(full).isDirectory(); } catch { isDir = false; }
-    return { source: 'file', type: 'create', name, path: full, drive: root.slice(0, 2), isDir };
+  // 只 stat 一次，复用 Stats 对象判断 isDirectory
+  let stats = null;
+  try { stats = fs.statSync(full); } catch { stats = null; }
+  if (stats) {
+    return { source: 'file', type: 'create', name, path: full, drive: root.slice(0, 2), isDir: stats.isDirectory() };
   }
-  return { source: 'file', type: 'delete', name, path: full, drive: root.slice(0, 2), isDir };
+  return { source: 'file', type: 'delete', name, path: full, drive: root.slice(0, 2), isDir: false };
 }
 
 class FileWatcher {
-  constructor({ drives = listFixedDrives(), filter = null, onEvent, onError }) {
+  constructor({ drives = listFixedDrives(), filter = null, onEvent, onError, onRecovered }) {
     this.drives = drives;
     this.filter = filter || (() => false);
     this.onEvent = onEvent;
     this.onError = onError;
+    this.onRecovered = onRecovered;
     this.watchers = new Map(); // root -> fs.FSWatcher
     this.stopped = false;
     this.remountTimer = null;
@@ -75,6 +75,7 @@ class FileWatcher {
         });
         w.on('error', (e2) => this.remount(root, e2));
         this.watchers.set(root, w);
+        this.onRecovered?.(root); // 重挂成功：上报恢复
       } catch (e2) {
         this.onError?.(new Error(`重新监听 ${root} 失败：${e2.message}`));
       }
