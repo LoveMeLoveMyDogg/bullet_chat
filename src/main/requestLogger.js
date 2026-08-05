@@ -18,7 +18,7 @@ class RequestLogger {
   }
 
   // channel: 'text' | 'vision'；input: 发送给模型的内容；reply: 模型原始回复；imageDataUrl: 视觉截图（可选）
-  logRequest({ channel, input, reply, imageDataUrl, error }) {
+  logRequest({ channel, input, reply, imageDataUrl, error, parsedCount }) {
     const entry = {
       ts: new Date().toISOString(),
       channel,
@@ -27,6 +27,7 @@ class RequestLogger {
     };
     if (imageDataUrl) entry.image = this.saveImage(channel, imageDataUrl);
     if (error) entry.error = String(error).slice(0, 300);
+    if (parsedCount !== undefined) entry.parsedCount = parsedCount;
     this.ring.push(entry);
     if (this.ring.length > MAX_MEMORY) this.ring.shift();
     try {

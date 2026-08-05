@@ -131,20 +131,20 @@ async function chatCompletion({ baseUrl, apiKey, model, system, user }) {
   } });
 }
 
-async function visionCompletion({ baseUrl, apiKey, model, system, imageDataUrl }) {
+async function visionCompletion({ baseUrl, apiKey, model, system, imageDataUrl, maxCount = 10 }) {
   return postChat({ baseUrl, apiKey, body: {
     model, temperature: 1.1, max_tokens: 1024,
     messages: [
       // 单条 user 消息（含图片），兼容不支持 system+图片的端点
       { role: 'user', content: [
-        { type: 'text', text: `${system}\n请根据这张截图发 3~5 条弹幕吐槽：扮演多个不同性格的观众（如毒舌、捧场、脑补、温柔、玩梗），每人发一条，每条不超过 20 个字。只返回 JSON 数组。` },
+        { type: 'text', text: `${system}\n请根据这张截图发 ${maxCount} 条弹幕吐槽：扮演多个不同性格的观众（如毒舌、捧场、脑补、温柔、玩梗），每人发一条，每条不超过 20 个字。只返回 JSON 数组。` },
         { type: 'image_url', image_url: { url: imageDataUrl } },
       ] },
     ],
   } });
 }
 
-function parseDanmakuJson(text) {
+function parseDanmakuJson(text, maxCount = MAX_DANMAKU) {
   if (!text) return [];
   let cleaned = text.trim();
   const fence = cleaned.match(/```(?:json)?\s*([\s\S]*?)```/);
@@ -158,11 +158,11 @@ function parseDanmakuJson(text) {
     return arr
       .filter((s) => typeof s === 'string' && s.trim())
       .map((s) => s.trim().slice(0, MAX_LEN))
-      .slice(0, MAX_DANMAKU);
+      .slice(0, maxCount);
   } catch {
     // JSON 解析失败：手工提取所有双引号字符串
     const items = [...cleaned.slice(start + 1, end).matchAll(/"([^"]*)"/g)]
-      .map((m) => m[1].trim()).filter(Boolean).slice(0, MAX_DANMAKU);
+      .map((m) => m[1].trim()).filter(Boolean).slice(0, maxCount);
     return items.map((s) => s.slice(0, MAX_LEN));
   }
 }

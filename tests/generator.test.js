@@ -78,6 +78,9 @@ test('parseDanmakuJson 各种脏格式', () => {
   // 超长截断
   const long = JSON.stringify(['这是一条特别特别特别特别特别长的弹幕内容超过二十个字啦']);
   assert.ok(parseDanmakuJson(long)[0].length <= 24);
+  // 自定义上限
+  assert.equal(parseDanmakuJson('["1","2","3","4","5","6"]', 3).length, 3);
+  assert.equal(parseDanmakuJson('["1","2"]', 5).length, 2);
 });
 
 test('testTextConnection 成功与失败', async () => {

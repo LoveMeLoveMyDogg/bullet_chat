@@ -19,6 +19,7 @@ async function load() {
   $('dm-max').value = config.danmaku.maxConcurrent;
   $('dm-burst-min').value = config.danmaku.burstMin;
   $('dm-burst-max').value = config.danmaku.burstMax;
+  $('dm-reply-count').value = config.danmaku.replyCount;
   $('dm-local').checked = config.danmaku.localMode;
   $('dm-read-content').checked = config.danmaku.readFileContent;
   for (const rb of document.querySelectorAll('input[name=dm-position]')) {
@@ -184,6 +185,7 @@ $('btn-save').onclick = async () => {
   const bmax = Math.max(bmin, Math.min(12, Number($('dm-burst-max').value) || 8));
   config.danmaku.burstMin = bmin;
   config.danmaku.burstMax = bmax; // 保存时校正 min<=max
+  config.danmaku.replyCount = Math.min(20, Math.max(1, Number($('dm-reply-count').value) || 10));
   config.danmaku.localMode = $('dm-local').checked;
   config.danmaku.readFileContent = $('dm-read-content').checked;
   const checkedPos = document.querySelector('input[name=dm-position]:checked');
@@ -232,7 +234,9 @@ async function renderRequestLogs() {
     if (l.reply) {
       const rep = document.createElement('div');
       rep.className = 'req-body';
-      rep.textContent = `回复：${l.reply}`;
+      rep.textContent = l.parsedCount !== undefined
+        ? `回复：${l.reply}（实际解析 ${l.parsedCount} 条）`
+        : `回复：${l.reply}`;
       row.appendChild(rep);
     }
     if (l.image) {

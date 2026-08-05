@@ -149,6 +149,8 @@ test('文字补充失败置错：错误期间不补充，恢复后重新补充',
   let fail = true;
   generator.chatCompletion = async () => { if (fail) throw new Error('挂了'); return '["1","2","3","4","5"]'; };
   brain.config.danmaku.minIntervalSec = 3600; // 缓冲保持，便于断言
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1; // 逐条吐，防随机批量耗尽 buffer
   brain.pushEntry(entry('create')); // 首次补充失败
   await new Promise((r) => setTimeout(r, 30));
   assert.ok(brain.getStatus().error);
@@ -208,6 +210,8 @@ test('视觉重试用真实图片', async () => {
 test('混合批次：屏幕条目与文件条目拆批，视觉用真实截图', async () => {
   const { brain, generator } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600; // 缓冲保持充足，文字只补充一次
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1; // 逐条吐，防随机批量导致 buffer 耗尽二次补充
   let visionImage = null;
   let lastTextUser = '';
   generator.visionCompletion = async ({ imageDataUrl }) => { visionImage = imageDataUrl; return '["屏幕弹"]'; };

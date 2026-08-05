@@ -32,6 +32,7 @@ test('弹幕外观默认值', () => {
   assert.equal(d.readFileContent, true); // 默认读取文件内容片段
   assert.equal(d.minIntervalVisionSec, 10); // 视觉独立限速默认 10s
   assert.equal(d.position, 'top'); // 弹幕默认顶部
+  assert.equal(d.replyCount, 10); // 一次 AI 回复条数默认 10
   assert.equal(d.animationsEnabled, undefined); // 旧键已移除
 });
 

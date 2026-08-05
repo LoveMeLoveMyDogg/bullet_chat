@@ -222,9 +222,9 @@ class Brain {
         model: this.config.textModel.model,
         system, user,
       });
-      this.logger?.logRequest({ channel: 'text', input: user, reply: raw });
+      const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
+      this.logger?.logRequest({ channel: 'text', input: user, reply: raw, parsedCount: lines.length });
       // 缓冲模式：解析结果全部进缓冲池，按节奏吐出（不立即全发）
-      const lines = parseDanmakuJson(raw);
       if (lines.length) {
         this.buffer.push(...lines);
         this.scheduleEmit();
@@ -248,6 +248,7 @@ class Brain {
         model: this.config.visionModel.model,
         system,
         imageDataUrl: entry.imageDataUrl,
+        maxCount: this.config.danmaku.replyCount || 10,
       });
       this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', reply: raw, imageDataUrl: entry.imageDataUrl });
       this.emitParsed(raw, 'vision');
@@ -259,7 +260,7 @@ class Brain {
 
   // 视觉弹幕：直接发送（画面弹幕实时性优先）
   emitParsed(raw, src) {
-    const lines = parseDanmakuJson(raw);
+    const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
     if (lines.length === 0) return;
     this.lastVisionEmit = this.clock();
     for (const line of lines) {

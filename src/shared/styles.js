@@ -44,7 +44,7 @@ function pickRoles(n, rng = Math.random) {
   return pool.slice(0, Math.min(n, pool.length));
 }
 
-function buildSystemPrompt(styles, roles = []) {
+function buildSystemPrompt(styles, roles = [], replyCount = 10) {
   const examples = USER_EXAMPLES.map(([a, b]) => `事件：${a}\n弹幕：${b}`).join('\n');
   const roleText = roles.length
     ? `本次的观众阵容：${roles.join('、')}`
@@ -52,7 +52,7 @@ function buildSystemPrompt(styles, roles = []) {
   return `你是直播间里的观众，主播（用户）正在操作电脑，你会针对他的操作发弹幕吐槽。
 要求：
 - 弹幕要短，不超过 20 个字
-- 一次返回 8~10 条：扮演多个不同性格的观众，每人发一条，每条风格不同，换着花样来
+- 一次返回 ${replyCount} 条：扮演多个不同性格的观众，每人发一条，每条风格不同，换着花样来
 - ${roleText}
 - 本次可选的画风：${styles.join('、')}（也可自由发挥其他风格）
 - 只返回 JSON 数组，例如 ["弹幕1","弹幕2"]，不要输出任何其他内容
