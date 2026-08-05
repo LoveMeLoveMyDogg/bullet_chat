@@ -129,9 +129,12 @@ const { createTray } = require('./tray');
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  app.quit();
+  // 第二实例：直接退出（app.exit 在 ready 事件前也生效，quit() 在 Windows 上可能无效）
+  app.exit(0);
 } else {
-  app.on('second-instance', () => app.quit());
+  app.on('second-instance', () => {
+    // 已有实例在运行，保持其存活，不执行任何操作
+  });
 
   app.whenReady().then(() => {
     // 托盘常驻，关闭所有窗口也不退出
@@ -2558,9 +2561,12 @@ function applyConfig(saved, { silent = false } = {}) {
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
-  app.quit();
+  // 第二实例：直接退出（app.exit 在 ready 事件前也生效，quit() 在 Windows 上可能无效）
+  app.exit(0);
 } else {
-  app.on('second-instance', () => app.quit());
+  app.on('second-instance', () => {
+    // 已有实例在运行，保持其存活，不执行任何操作
+  });
 
   app.whenReady().then(() => {
     config = loadConfig();
