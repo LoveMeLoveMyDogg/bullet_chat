@@ -152,7 +152,8 @@ $('btn-save').onclick = async () => {
   config.visionModel.apiKey = $('vision-apiKey').value.trim();
   config.visionModel.model = $('vision-model').value.trim();
   config.visionModel.captureIntervalSec = Math.max(2, Number($('vision-interval').value) || 4);
-  config.danmaku.minIntervalSec = Math.max(0, Number($('dm-interval').value) || 10);
+  const iv = Number($('dm-interval').value);
+  config.danmaku.minIntervalSec = Number.isNaN(iv) ? 10 : Math.max(0, iv); // 0 是合法值（不间隔），仅非数字回退 10
   config.danmaku.maxConcurrent = Math.min(12, Math.max(1, Number($('dm-max').value) || 6));
   config.danmaku.animationsEnabled = $('dm-anim').checked;
   config.danmaku.localMode = $('dm-local').checked;

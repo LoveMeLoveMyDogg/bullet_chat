@@ -37,7 +37,13 @@ async function postChat({ baseUrl, apiKey, body }) {
     throw new ApiError('network', `网络错误：${err.message}`);
   }
   if (!res.ok) throw friendlyError(res.status);
-  const data = await res.json();
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    // 200 但响应体不是 JSON（如代理返回 HTML 错误页）
+    throw new ApiError('bad-response', '服务端返回了非 JSON 内容');
+  }
   return data.choices?.[0]?.message?.content ?? '';
 }
 

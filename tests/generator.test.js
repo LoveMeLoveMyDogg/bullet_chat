@@ -46,6 +46,16 @@ test('chatCompletion 网络错误归类', async () => {
   } finally { restore(); }
 });
 
+test('chatCompletion 200 但非 JSON 响应报友好错误', async () => {
+  const restore = mockFetch(async () => ({ ok: true, json: async () => { throw new SyntaxError('Unexpected token <'); } }));
+  try {
+    await assert.rejects(
+      () => chatCompletion({ baseUrl: 'b', apiKey: 'k', model: 'm', system: 's', user: 'u' }),
+      (e) => e instanceof ApiError && e.code === 'bad-response' && e.message.includes('非 JSON')
+    );
+  } finally { restore(); }
+});
+
 test('visionCompletion 请求带图片', async () => {
   const restore = mockFetch(async (url, opts) => {
     const body = JSON.parse(opts.body);
