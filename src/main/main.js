@@ -17,6 +17,10 @@ const { RequestLogger } = require('./requestLogger');
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'preload.js');
 
+// 固定配置目录：打包后默认 userData 会变成 %APPDATA%/BulletChat（productName），
+// 与开发版 %APPDATA%/bullet-chat 不一致会"丢配置"。必须在 app ready 之前设置
+app.setPath('userData', path.join(app.getPath('appData'), 'bullet-chat'));
+
 let brain = null;
 let watcher = null;
 let stage = null;

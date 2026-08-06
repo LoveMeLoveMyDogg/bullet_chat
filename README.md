@@ -13,6 +13,24 @@ npm install
 npm start
 ```
 
+## 打包
+
+Windows 上打 exe（NSIS 安装包）：
+```bash
+npm run build:win
+```
+macOS 上打 dmg：
+```bash
+npm run build:mac
+```
+产物在 `dist/` 目录。平台限制：exe 只能在 Windows 构建，dmg 只能在 macOS 构建。
+
+自用分发（未签名）说明：
+- Windows：首次运行安装包会提示「未知发布者」，点「更多信息 → 仍要运行」
+- macOS：首次打开需右键应用 →「打开」；屏幕识别需重新授权（系统设置 → 隐私与安全性 → 屏幕录制，权限按应用独立）
+
+应用图标：默认是 `tools/generate-icon.js` 生成的占位图（`assets/icon.png`），想换图标直接替换该文件后重新构建即可。
+
 ## 使用
 
 1. 托盘图标 → 打开设置
