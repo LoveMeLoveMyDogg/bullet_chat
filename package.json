@@ -8,8 +8,7 @@
     "start": "electron .",
     "test": "node --test",
     "build:win": "electron-builder --win",
-    "build:mac": "electron-builder --mac",
-    "dist": "electron-builder --win --mac"
+    "build:mac": "electron-builder --mac"
   },
   "devDependencies": {
     "electron": "^37.2.0",
