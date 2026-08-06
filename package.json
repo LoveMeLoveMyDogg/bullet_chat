@@ -2,12 +2,37 @@
   "name": "bullet-chat",
   "version": "0.1.0",
   "description": "桌面弹幕直播：监控你的文件操作，AI 观众发弹幕吐槽",
+  "author": "szp",
   "main": "src/main/main.js",
   "scripts": {
     "start": "electron .",
-    "test": "node --test"
+    "test": "node --test",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "dist": "electron-builder --win --mac"
   },
   "devDependencies": {
-    "electron": "^37.2.0"
+    "electron": "^37.2.0",
+    "electron-builder": "^26.15.3"
+  },
+  "build": {
+    "appId": "com.bulletchat.app",
+    "productName": "BulletChat",
+    "icon": "assets/icon.png",
+    "files": ["src/**/*", "assets/**/*"],
+    "win": {
+      "target": ["nsis"]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerLanguages": ["zh_CN", "en_US"],
+      "shortcutName": "BulletChat"
+    },
+    "mac": {
+      "target": ["dmg"],
+      "identity": null,
+      "category": "public.app-category.utilities"
+    }
   }
 }
