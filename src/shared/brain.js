@@ -315,26 +315,22 @@ class Brain {
         maxCount: this.config.danmaku.replyCount || 10,
       });
       this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', reply: raw, imageDataUrl: entry.imageDataUrl });
-      const parsedCount = this.emitParsed(raw, 'vision');
-      this.usageCounter?.record({ channel: 'vision', inputChars: 0, systemChars: system.length, outputChars: raw.length, parsedCount, imageKb: dataUrlKb(entry.imageDataUrl) });
+      const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
+      this.lastVisionEmit = this.clock(); // 视觉调用限速标记（minIntervalVisionSec 闸门用）
+      this.usageCounter?.record({ channel: 'vision', inputChars: 0, systemChars: system.length, outputChars: raw.length, parsedCount: lines.length, imageKb: dataUrlKb(entry.imageDataUrl) });
+      // 视觉弹幕也进缓冲：飘出节奏与文字统一（burstMin/burstMax + minIntervalSec 全局生效）。
+      // 旧实现一次回复全部瞬间飘出——"一次飘出条数范围"对视觉通道失效，且同屏堆积重叠
+      if (lines.length) {
+        this.buffer.push(...lines);
+        this.scheduleEmit();
+      }
+      if (this.state.error.vision) this.clearError('vision');
+      this.emitStatus();
     } catch (err) {
       this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', imageDataUrl: entry.imageDataUrl, error: err.message });
       this.usageCounter?.record({ channel: 'vision', inputChars: 0, systemChars: system.length, error: err, imageKb: dataUrlKb(entry.imageDataUrl) });
       this.fail('vision', err);
     }
-  }
-
-  // 视觉弹幕：直接发送（画面弹幕实时性优先）；返回解析条数（调用统计用）
-  emitParsed(raw, src) {
-    const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
-    if (lines.length === 0) return 0;
-    this.lastVisionEmit = this.clock();
-    for (const line of lines) {
-      this.onDanmaku(line, { source: 'ai' });
-    }
-    if (this.state.error[src]) this.clearError(src);
-    this.emitStatus();
-    return lines.length;
   }
 
   emitLocal(entry) {

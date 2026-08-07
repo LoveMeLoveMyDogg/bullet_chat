@@ -21,12 +21,24 @@ function buildLanes() {
 
 function freeLane() {
   for (const lane of config.lanes) if (!lane.busy) return lane;
-  return config.lanes[Math.floor(Math.random() * config.lanes.length)]; // 全忙则随机复用
+  return null; // 全忙：不随机复用（同轨道复用会重叠——fly 同速同轨完全重叠），由调用方排队
+}
+
+// 同屏上限：轨道全忙时新弹幕排队，轨道释放后按到达顺序补发（防重叠）
+const pending = [];
+function dequeue() {
+  if (!pending.length) return;
+  const next = pending.shift();
+  show(next.text, next.meta);
 }
 
 function show(text, meta = {}) {
   if (!config.lanes) buildLanes();
   const lane = freeLane();
+  if (!lane) {
+    pending.push({ text, meta });
+    return;
+  }
   lane.busy = true;
   const el = document.createElement('div');
   el.className = 'danmaku';
@@ -42,9 +54,9 @@ function show(text, meta = {}) {
     el.style.left = '20px'; // 动画全关：静止显示
   }
   lane.el.appendChild(el);
-  // 移除时长与动画时长对齐（防中途截断），静态弹幕 8 秒
+  // 移除时长与动画时长对齐（防中途截断），静态弹幕 8 秒；释放轨道后补发排队弹幕
   const duration = anim ? ds.durationFor(anim, config.speed) : 8000;
-  setTimeout(() => { el.remove(); lane.busy = false; }, duration);
+  setTimeout(() => { el.remove(); lane.busy = false; dequeue(); }, duration);
 }
 
 window.api.onStageConfig((cfg) => {
