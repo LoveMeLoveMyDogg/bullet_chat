@@ -4,9 +4,19 @@ const { displayNameFor } = require('../shared/appNames');
 
 const POLL_MS = 2000; // 轮询间隔：变化才发事件，几乎不占 CPU
 
-// lsappinfo front 输出："frontASN = ASN:0x0-0x1234:com.microsoft.VSCode"
+// lsappinfo front 输出：
+//   旧版：frontASN = ASN:0x0-0x1234:com.microsoft.VSCode
+//   macOS 26：ASN:0x0-0x11011:（裸 ASN，无 bundle id 后缀）
+// 返回 bundle id（旧格式）或裸 ASN（新格式），无匹配返回 null
 function parseMacFront(out) {
-  const m = /:([A-Za-z0-9.-]+)\s*$/.exec(String(out || '').trim());
+  const m = /^(?:frontASN\s*=\s*)?(ASN:[A-Za-z0-9-]+)(?::([A-Za-z0-9.-]+))?:?\s*$/.exec(String(out || '').trim());
+  return m ? (m[2] || m[1]) : null;
+}
+
+// lsappinfo info <ASN> -only bundleid 输出："CFBundleIdentifier"="com.apple.finder"；
+// 也容忍裸引号形式："com.apple.finder"；无匹配返回 null
+function parseBundleId(out) {
+  const m = /(?:"?CFBundleIdentifier"?\s*=\s*)?"([A-Za-z0-9.-]+)"/.exec(String(out || '').trim());
   return m ? m[1] : null;
 }
 
@@ -94,8 +104,15 @@ class AppWatcher {
       return new Promise((resolve) => {
         this.exec('lsappinfo', ['front'], (err, stdout) => {
           if (err) return resolve(null);
-          const key = parseMacFront(stdout);
-          resolve(key ? { appKey: key } : null);
+          const token = parseMacFront(stdout);
+          if (!token) return resolve(null);
+          if (token.includes('.')) return resolve({ appKey: token }); // 旧格式：直接是 bundle id
+          // macOS 26：裸 ASN，需按 ASN 二次查询 bundle id
+          this.exec('lsappinfo', ['info', token, '-only', 'bundleid'], (err2, stdout2) => {
+            if (err2) return resolve(null);
+            const key = parseBundleId(stdout2);
+            resolve(key ? { appKey: key } : null);
+          });
         });
       });
     }
@@ -116,4 +133,4 @@ class AppWatcher {
   }
 }
 
-module.exports = { POLL_MS, parseMacFront, parseWinLine, AppWatcher };
+module.exports = { POLL_MS, parseMacFront, parseBundleId, parseWinLine, AppWatcher };

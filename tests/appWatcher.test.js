@@ -1,12 +1,21 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseMacFront, parseWinLine, AppWatcher } = require('../src/main/appWatcher');
+const { parseMacFront, parseBundleId, parseWinLine, AppWatcher } = require('../src/main/appWatcher');
 
 test('parseMacFront 解析 lsappinfo front 输出', () => {
   assert.equal(parseMacFront('frontASN = ASN:0x0-0x1234:com.microsoft.VSCode'), 'com.microsoft.VSCode');
   assert.equal(parseMacFront('frontASN = ASN:0x0-0x1234:com.google.chrome\n'), 'com.google.chrome');
+  assert.equal(parseMacFront('ASN:0x0-0x11011:'), 'ASN:0x0-0x11011', 'macOS 26 裸 ASN 格式（去结尾冒号）');
+  assert.equal(parseMacFront('ASN:0x0-0x11011'), 'ASN:0x0-0x11011', '裸 ASN 无结尾冒号');
   assert.equal(parseMacFront(''), null);
   assert.equal(parseMacFront('lsappinfo: no front app'), null);
+});
+
+test('parseBundleId 解析 lsappinfo info -only bundleid 输出', () => {
+  assert.equal(parseBundleId('"CFBundleIdentifier"="com.apple.finder"'), 'com.apple.finder');
+  assert.equal(parseBundleId('"com.apple.finder"'), 'com.apple.finder', '裸引号形式');
+  assert.equal(parseBundleId(''), null);
+  assert.equal(parseBundleId('(null)'), null);
 });
 
 test('parseWinLine 解析 PowerShell 输出', () => {
@@ -79,4 +88,25 @@ test('AppWatcher 无前台应用跳过（锁屏）', async () => {
   });
   await fw.poll();
   assert.equal(events.length, 0);
+});
+
+test('AppWatcher 两步探测（macOS 26 裸 ASN → lsappinfo info 取 bundle id）', async () => {
+  const events = [];
+  const calls = [];
+  const fw = new AppWatcher({
+    pollMs: 1000, clock: () => 1000000, platform: 'darwin',
+    exec: (_cmd, args, cb) => {
+      calls.push(args);
+      if (args[0] === 'front') return cb(null, 'ASN:0x0-0x11011:');
+      if (args[0] === 'info') return cb(null, '"CFBundleIdentifier"="com.apple.finder"');
+      cb(new Error('unexpected args'));
+    },
+    onEvent: (e) => events.push(e), onStay: () => {},
+    stayMinutes: 20,
+  });
+  await fw.poll();
+  assert.deepEqual(calls, [['front'], ['info', 'ASN:0x0-0x11011', '-only', 'bundleid']], '两次调用：front 后按 ASN 查 bundle id');
+  assert.equal(events.length, 1, '切换事件触发');
+  assert.equal(events[0].appKey, 'com.apple.finder');
+  assert.equal(events[0].name, '访达', '显示名映射');
 });
