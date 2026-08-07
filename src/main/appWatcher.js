@@ -29,10 +29,30 @@ function parseWinLine(line) {
   return { appKey: s.slice(0, i).toLowerCase(), title: s.slice(i + 1) };
 }
 
+// PowerShell 长驻脚本 stdout 行："进程名小写|窗口标题"；空行 = 无前台窗口
+// 用 user32.GetForegroundWindow 取真实前台窗口（Get-Process 的 MainWindowHandle
+// 排序取"最后一个"不等于前台窗口：最小化的记事本句柄也可能大于 Alt-Tab 切到的 Chrome）
 const WIN_POLL_SCRIPT = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public class WinFore {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+}
+"@
 while ($true) {
-  $p = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 } | Sort-Object MainWindowHandle | Select-Object -Last 1
-  if ($p) { Write-Output ($p.ProcessName.ToLower() + '|' + $p.MainWindowTitle) } else { Write-Output '' }
+  $hwnd = [WinFore]::GetForegroundWindow()
+  if ($hwnd -ne [IntPtr]::Zero) {
+    $procId = [uint32]0
+    [WinFore]::GetWindowThreadProcessId($hwnd, [ref]$procId) | Out-Null
+    $sb = New-Object System.Text.StringBuilder 512
+    [WinFore]::GetWindowText($hwnd, $sb, 512) | Out-Null
+    $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
+    if ($p) { Write-Output ($p.ProcessName.ToLower() + '|' + $sb.ToString()) } else { Write-Output '' }
+  } else { Write-Output '' }
   Start-Sleep -Milliseconds ${POLL_MS}
 }`;
 
@@ -50,11 +70,6 @@ class AppWatcher {
     this.current = null; // { appKey, since }
     this.timer = null;
     this.winProc = null;
-  }
-
-  updateConfig({ stayMinutes, aliases } = {}) {
-    if (stayMinutes !== undefined) this.stayMinutes = stayMinutes;
-    if (aliases !== undefined) this.aliases = aliases;
   }
 
   start() {
@@ -120,7 +135,10 @@ class AppWatcher {
     return new Promise((resolve) => {
       if (!this.winProc) {
         this.winProc = spawn('powershell', ['-NoProfile', '-Command', WIN_POLL_SCRIPT], { stdio: ['ignore', 'pipe', 'inherit'] });
-        this.winProc.on('error', (err) => this.onError?.(new Error(`PowerShell 启动失败：${err.message}`)));
+        this.winProc.on('error', (err) => {
+          this.winProc = null; // spawn 'error' 后 Node 不一定再触发 'exit'，不置空轮询会静默死掉
+          this.onError?.(new Error(`PowerShell 启动失败：${err.message}`));
+        });
         this.winProc.on('exit', () => { this.winProc = null; });
         this.winLineBuf = null;
         readline.createInterface({ input: this.winProc.stdout }).on('line', (line) => {

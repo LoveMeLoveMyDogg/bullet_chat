@@ -596,3 +596,35 @@ test('调用统计：成功与失败都记录，探测不计数', async () => {
   brain.stop();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+const { buildSystemPrompt } = require('../src/shared/styles');
+
+test('调用统计：视觉通道计数（system 不重复计、截图 KB 计 token）', async () => {
+  // 等待异步视觉调用完成：轮询条件而非固定延时（防全量跑时负载导致的 flake）
+  async function waitForVisionCalls(uc, n, timeoutMs = 2000) {
+    const t0 = Date.now();
+    while (uc.getToday().vision.calls < n) {
+      if (Date.now() - t0 > timeoutMs) {
+        throw new Error(`等待视觉调用计数 ${n} 超时（当前 ${uc.getToday().vision.calls}）`);
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-usage-'));
+  const uc = new UsageCounter({ dir, clock: () => 0, fsMod: fs });
+  const { brain, generator } = makeEnv({ usageCounter: uc });
+  brain.config.danmaku.styles = ['正经夸夸']; // 固定画风：system prompt 长度可在测试里复算
+  const imageDataUrl = 'data:image/jpeg;base64,' + 'A'.repeat(4096); // ≈3KB（4096*3/4/1024）
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl });
+  await waitForVisionCalls(uc, 1);
+  assert.equal(generator.visionCalls, 1);
+  const v = uc.getToday().vision;
+  assert.equal(v.calls, 1);
+  assert.equal(v.danmaku, 1, '["屏幕弹幕"] 解析出 1 条');
+  // 视觉无事件描述输入：inputChars=0，system 只计一次 + 截图 KB
+  const systemLen = buildSystemPrompt(brain.config.danmaku.styles).length;
+  assert.equal(v.inputTokens, Math.ceil(systemLen / 1.5) + Math.ceil(3 * 12), 'inputChars=0，system 不重复计');
+  assert.equal(v.outputTokens, Math.ceil('["屏幕弹幕"]'.length / 1.5));
+  brain.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
+});

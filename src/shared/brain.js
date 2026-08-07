@@ -312,10 +312,10 @@ class Brain {
       });
       this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', reply: raw, imageDataUrl: entry.imageDataUrl });
       const parsedCount = this.emitParsed(raw, 'vision');
-      this.usageCounter?.record({ channel: 'vision', inputChars: system.length, systemChars: system.length, outputChars: raw.length, parsedCount, imageKb: dataUrlKb(entry.imageDataUrl) });
+      this.usageCounter?.record({ channel: 'vision', inputChars: 0, systemChars: system.length, outputChars: raw.length, parsedCount, imageKb: dataUrlKb(entry.imageDataUrl) });
     } catch (err) {
       this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', imageDataUrl: entry.imageDataUrl, error: err.message });
-      this.usageCounter?.record({ channel: 'vision', inputChars: system.length, systemChars: system.length, error: err, imageKb: dataUrlKb(entry.imageDataUrl) });
+      this.usageCounter?.record({ channel: 'vision', inputChars: 0, systemChars: system.length, error: err, imageKb: dataUrlKb(entry.imageDataUrl) });
       this.fail('vision', err);
     }
   }

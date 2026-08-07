@@ -91,10 +91,12 @@ class UsageCounter {
   }
 
   getToday() {
+    this.ensureDay(this.clock()); // 跨午夜无新记录时也主动切日，不显示昨日残留
     return aggregate(this.records);
   }
 
   getHistory(days = KEEP_DAYS) {
+    this.ensureDay(this.clock()); // 同上：读取前先切到当前日（7 天窗口按新一天计算）
     const out = [];
     const now = this.clock();
     for (let i = days - 1; i >= 0; i--) {

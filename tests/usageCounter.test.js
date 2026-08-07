@@ -102,6 +102,19 @@ test('aggregate 分通道与合计（含失败与产出）', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('跨午夜无新记录：getToday/getHistory 主动切日，不显示昨日残留', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-usage-'));
+  let fakeNow = Date.parse('2026-08-07T23:59:00Z');
+  const uc = new UsageCounter({ dir, clock: () => fakeNow, fsMod: fs });
+  uc.record({ channel: 'text', inputChars: 10, systemChars: 10 });
+  assert.equal(uc.getToday().total.calls, 1);
+  // 跨午夜后无任何新记录：getToday/getHistory 也应切到新一天（8/8 无记录）
+  fakeNow = Date.parse('2026-08-08T00:01:00Z');
+  assert.equal(uc.getToday().total.calls, 0, 'getToday 不应显示昨日残留');
+  assert.equal(uc.getHistory(1)[0].date, '2026-08-08', 'getHistory 按新一天计算');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
 test('getHistory 返回近 7 天（含空天）', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-usage-'));
   let fakeNow = Date.parse('2026-08-07T10:00:00Z');
