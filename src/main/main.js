@@ -12,6 +12,7 @@ const { Stage } = require('./stage');
 const { ErrorReporter } = require('./errorReporter');
 const { createSettingsWindow, registerSettingsIpc } = require('./settingsWindow');
 const { ScreenWatcher } = require('./screenWatcher');
+const { AppWatcher } = require('./appWatcher');
 const { ImageProcessor } = require('./imageProcessor');
 const { startDemo, stopDemo } = require('./demoMode');
 const { RequestLogger } = require('./requestLogger');
@@ -30,6 +31,7 @@ let config = null;
 let paused = false;
 let demoHandle = null;
 let screenWatcher = null;
+let appWatcher = null;
 let processor = null;
 let screenPaused = false; // 托盘"暂停屏幕识别"开关
 
@@ -54,6 +56,8 @@ function applyScreenWatcher() {
     onEntry: (entry) => brain?.pushEntry(entry),
     onError: (err) => reporter?.reportError('screen', err),
     onRecovered: () => reporter?.reportRecovered?.('screen'),
+    idleMinutes: config.monitor.idleMinutes,
+    onIdle: (e) => brain?.pushEntry(e),
     processor,
   });
   screenWatcher.start();
@@ -80,6 +84,17 @@ function applyConfig(saved, { silent = false } = {}) {
     onRecovered: () => reporter?.reportRecovered?.('watch'),
   });
   watcher.start();
+  // 前台应用监控：切换/停留事件进 brain（观众群体系的事件源）。
+  // 创建/重启都走 applyConfig（首次启动与每次保存配置），与文件/屏幕事件源一致
+  if (appWatcher) appWatcher.stop();
+  appWatcher = new AppWatcher({
+    stayMinutes: config.monitor.stayMinutes,
+    aliases: config.monitor.appAliases,
+    onEvent: (e) => brain?.pushEntry(e),
+    onStay: (e) => brain?.pushEntry(e),
+    onError: (err) => reporter?.reportError('watch', err),
+  });
+  if (config.monitor.appWatch) appWatcher.start();
   // 同步演出层配置
   if (stage) stage.updateConfig(config.danmaku);
   // 配置保存后立即重试
@@ -131,6 +146,7 @@ if (!gotLock) {
       templates,
       reporter,
       logger,
+      getCurrentApp: () => appWatcher?.getCurrent() || null,
       onDanmaku: (text, meta) => stage?.send(text, meta),
     });
 
