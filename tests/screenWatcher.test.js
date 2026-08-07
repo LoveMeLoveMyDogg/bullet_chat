@@ -33,3 +33,37 @@ test('少数像素变化低于阈值', () => {
   assert.ok(pixelDiffRatio(a, b) > 0);
   assert.ok(pixelDiffRatio(a, b) < 0.01);
 });
+
+test('updateIdle 状态机：无变化超阈值播报一次，恢复后重新计时', () => {
+  const { ScreenWatcher } = require('../src/main/screenWatcher');
+  let fakeNow = 1000000;
+  const idleEvents = [];
+  const sw = new ScreenWatcher({
+    config: { visionModel: {} },
+    getMasks: () => [], processor: { process: async (d, m) => d },
+    onEntry: () => {}, onError: () => {}, onRecovered: () => {},
+    idleMinutes: 10, onIdle: (e) => idleEvents.push(e),
+    clock: () => fakeNow,
+  });
+  // 前 9 分钟：无变化但未到阈值
+  fakeNow += 9 * 60 * 1000;
+  assert.equal(sw.updateIdle(false), null);
+  assert.equal(idleEvents.length, 0);
+  // 第 11 分钟：触发
+  fakeNow += 2 * 60 * 1000;
+  const e = sw.updateIdle(false);
+  assert.equal(e.type, 'idle');
+  assert.equal(idleEvents.length, 1);
+  // 已播报：继续无变化不再播
+  fakeNow += 60 * 1000;
+  assert.equal(sw.updateIdle(false), null);
+  assert.equal(idleEvents.length, 1);
+  // 画面恢复：重新计时
+  sw.updateIdle(true);
+  fakeNow += 11 * 60 * 1000;
+  assert.equal(sw.updateIdle(false).type, 'idle');
+  assert.equal(idleEvents.length, 2);
+  // idleMinutes=0 关闭
+  const sw0 = new ScreenWatcher({ config: {}, getMasks: () => [], onEntry: () => {}, onError: () => {}, onRecovered: () => {}, idleMinutes: 0, clock: () => fakeNow });
+  assert.equal(sw0.updateIdle(false), null);
+});

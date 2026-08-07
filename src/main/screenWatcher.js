@@ -19,17 +19,40 @@ function pixelDiffRatio(a, b) {
 }
 
 class ScreenWatcher {
-  constructor({ config, getMasks, onEntry, onError, onRecovered, processor }) {
+  constructor({ config, getMasks, onEntry, onError, onRecovered, processor, idleMinutes = 0, onIdle = null, clock = Date.now }) {
     this.config = config;
     this.getMasks = getMasks;
     this.onEntry = onEntry;
     this.onError = onError;
     this.onRecovered = onRecovered;
     this.processor = processor;
+    this.idleMinutes = idleMinutes; // 0 = 关闭空闲播报
+    this.onIdle = onIdle;
+    this.clock = clock;
+    this.idleSince = this.clock(); // 最后一次画面变化时刻（启动即开始计时）
+    this.idleSent = false; // 本段空闲已播报（只播一次）
     this.timer = null;
     this.ticking = false;
     this.hadError = false; // 上一轮 tick 是否出错（成功一轮后上报恢复）
     this.last = new Map(); // display_id -> { bits }
+  }
+
+  // 空闲计时状态机（纯逻辑，可测）：画面有变化重置；无变化累计超 idleMinutes 播报一次
+  updateIdle(hasChanged) {
+    if (this.idleMinutes <= 0) return null;
+    if (hasChanged) {
+      this.idleSince = this.clock();
+      this.idleSent = false;
+      return null;
+    }
+    if (this.idleSent) return null;
+    if (this.clock() - this.idleSince >= this.idleMinutes * 60000) {
+      this.idleSent = true;
+      const entry = { source: 'file', type: 'idle', name: '', drive: '', isDir: false };
+      this.onIdle?.(entry);
+      return entry;
+    }
+    return null;
   }
 
   start() {
@@ -81,7 +104,11 @@ class ScreenWatcher {
         }
         const diff = pixelDiffRatio(prev.bits, bits);
         this.last.set(src.display_id, { bits });
-        if (diff < DIFF_THRESHOLD) continue;
+        if (diff < DIFF_THRESHOLD) {
+          this.updateIdle(false); // updateIdle 内部播报（与 AppWatcher 事件源模式一致）
+          continue;
+        }
+        this.updateIdle(true);
 
         // 有变化：抓大图 → 应用遮罩 → 交给 Brain
         const full = await this.captureFull(src.display_id);
