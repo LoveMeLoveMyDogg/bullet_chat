@@ -276,7 +276,7 @@ function templateFor(type, rng = Math.random) {
 function fillTemplate(tpl, entry) {
   const name = entry.name || '这个';
   const loc = entry.drive || '';
-  return tpl.replaceAll('{name}', name).replaceAll('{loc}', loc).slice(0, 24);
+  return tpl.replaceAll('{name}', name).replaceAll('{loc}', loc).replaceAll('{minutes}', entry.minutes ?? '多').slice(0, 24);
 }
 
 module.exports = { TEMPLATES, templateFor, fillTemplate };

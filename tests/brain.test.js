@@ -494,3 +494,67 @@ test('S1-3 stop 后状态广播为 idle（托盘/设置页即时感知）', () =
   brain.stop();
   assert.equal(statuses[statuses.length - 1].mode, 'idle');
 });
+
+const { resolveGroup } = require('../src/shared/audienceGroups');
+
+test('观众群：app_switch 命中不同群补发 app_enter 登场弹幕', () => {
+  const { brain } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.buffer.push('占位1', '占位2', '占位3'); // 缓冲充足：不触发补充，观察队列
+  brain.pushEntry({ source: 'app', type: 'app_switch', name: 'VSCode', appKey: 'code', drive: '', isDir: false });
+  assert.equal(brain.currentGroup, '程序员天团');
+  assert.deepEqual(brain.queue.map((e) => e.type), ['app_enter', 'app_switch'], '登场 + 切换先后入队');
+  assert.equal(brain.queue[0].name, '程序员天团');
+  // 同群再切换：不补发登场
+  brain.queue.length = 0;
+  brain.pushEntry({ source: 'app', type: 'app_switch', name: 'IDEA', appKey: 'idea64', drive: '', isDir: false });
+  assert.equal(brain.queue.length, 1, '同群切换只入 app_switch');
+  brain.stop();
+});
+
+test('观众群：场景与角色注入生成 prompt', async () => {
+  const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  let lastSystem = '';
+  generator.chatCompletion = async ({ system }) => { lastSystem = system; return '["1"]'; };
+  brain.pushEntry({ source: 'file', type: 'create', name: 'a.js', path: 'C:\\a.js', drive: 'C:', isDir: false, appKey: 'code' });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(lastSystem.includes('当前场景：你是一群程序员观众'), '场景注入');
+  assert.ok(lastSystem.includes('秃头架构师'), '群角色注入');
+  brain.stop();
+});
+
+test('事件场景化：文件事件自动打前台应用戳', async () => {
+  const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  let lastSystem = '';
+  generator.chatCompletion = async ({ system }) => { lastSystem = system; return '["1"]'; };
+  brain.getCurrentApp = () => ({ appKey: 'chrome' });
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(lastSystem.includes('当前场景：你是一群吃瓜群众'), '按事件到达时前台应用选群');
+  brain.stop();
+});
+
+test('本地模式：app_switch 登场走模板兜底', async () => {
+  const { brain, danmaku } = makeEnv();
+  brain.setLocalMode(true);
+  brain.pushEntry({ source: 'app', type: 'app_switch', name: 'VSCode', appKey: 'code', drive: '', isDir: false });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(danmaku.length, 2, '切换 + 登场两条本地弹幕');
+  assert.equal(brain.currentGroup, '程序员天团');
+  brain.stop();
+});
+
+test('停留/空闲事件进文字队列并带时间戳', async () => {
+  const { brain } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.buffer.push('占位1', '占位2', '占位3'); // 缓冲充足：不触发补充，观察队列
+  brain.pushEntry({ source: 'app', type: 'app_stay', name: 'VSCode', appKey: 'code', minutes: 20, drive: '', isDir: false });
+  brain.pushEntry({ source: 'file', type: 'idle', name: '', drive: '' });
+  assert.equal(brain.queue.length, 2);
+  assert.ok(brain.queue[0].ts > 0, '带到达时间戳（时间窗过滤用）');
+  brain.stop();
+});

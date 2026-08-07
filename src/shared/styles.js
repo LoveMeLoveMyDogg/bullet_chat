@@ -44,12 +44,13 @@ function pickRoles(n, rng = Math.random) {
   return pool.slice(0, Math.min(n, pool.length));
 }
 
-function buildSystemPrompt(styles, roles = [], replyCount = 10) {
+function buildSystemPrompt(styles, roles = [], replyCount = 10, scene = null) {
   const examples = USER_EXAMPLES.map(([a, b]) => `事件：${a}\n弹幕：${b}`).join('\n');
   const roleText = roles.length
     ? `本次的观众阵容：${roles.join('、')}`
     : '观众性格随机多样（毒舌、捧场、脑补、温柔、玩梗、古风、中英混搭、学术、佛系、杠精、夸夸、二次元等）';
-  return `你是直播间里的观众，主播（用户）正在操作电脑，你会针对他的操作发弹幕吐槽。
+  const sceneText = scene ? `\n当前场景：${scene}` : '';
+  return `你是直播间里的观众，主播（用户）正在操作电脑，你会针对他的操作发弹幕吐槽。${sceneText}
 要求：
 - 弹幕要短，不超过 20 个字
 - 一次返回 ${replyCount} 条：扮演多个不同性格的观众，每人发一条，每条风格不同，换着花样来

@@ -31,3 +31,18 @@ test('应用/空闲事件模板池非空且可填充', () => {
     assert.ok(text.length > 0 && text.length <= 24);
   }
 });
+
+test('fillTemplate 兜底占位符：全部模板填充后不留 { 残留', () => {
+  const realistic = { name: 'VSCode', drive: '', minutes: 20 };
+  for (const [type, list] of Object.entries(TEMPLATES)) {
+    for (const t of list) {
+      const out = fillTemplate(t, realistic);
+      assert.ok(!out.includes('{'), `${type} 模板残留占位符：${t} → ${out}`);
+    }
+  }
+});
+
+test('app_stay 模板渲染停留分钟数', () => {
+  const out = fillTemplate(templateFor('app_stay', () => 0), { name: 'VSCode', drive: '', minutes: 20 });
+  assert.ok(out.includes('20 分钟'), `应渲染分钟数，实际：${out}`);
+});

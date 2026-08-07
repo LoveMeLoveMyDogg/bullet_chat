@@ -1,6 +1,7 @@
 const { formatEventDescription } = require('./noiseFilter');
 const { pickStyles, pickRoles, buildSystemPrompt } = require('./styles');
 const { templateFor, fillTemplate } = require('./templates');
+const { resolveGroup } = require('./audienceGroups');
 const { parseDanmakuJson, RED_SQUARE_DATA_URL } = require('../main/generator');
 const fs = require('node:fs');
 
@@ -11,6 +12,7 @@ const REFILL_THRESHOLD = 2; // 缓冲剩余 ≤2 条时触发补充（提前量�
 const MAX_READ_BYTES = 50 * 1024;   // 超过此大小不读内容（大文件/构建产物）
 const MAX_CONTENT_CHARS = 200;      // 内容片段最长字符数
 const BINARY_PROBE = 4096;          // 二进制检测采样长度
+const FILE_APP_TYPES = ['create', 'change', 'delete', 'rename', 'move']; // 文件操作类型：打前台应用戳
 
 // 读取文本文件内容片段（供 AI 生成"懂内容"的弹幕）。
 // 只读小文本文件：超限/二进制/读取失败一律返回空串（保持事件描述不因内容读取而失败）
@@ -55,7 +57,7 @@ function currentStyles(brain) {
 }
 
 class Brain {
-  constructor({ config, generator, templates, reporter, logger = null, clock = Date.now, rng = Math.random, onDanmaku, onStatus }) {
+  constructor({ config, generator, templates, reporter, logger = null, clock = Date.now, rng = Math.random, onDanmaku, onStatus, getCurrentApp = null }) {
     this.config = config;
     this.generator = generator;
     this.templates = templates;
@@ -65,6 +67,8 @@ class Brain {
     this.rng = rng;
     this.onDanmaku = onDanmaku;
     this.onStatus = onStatus;
+    this.getCurrentApp = getCurrentApp; // 前台应用上下文回调（main 装配注入），事件场景化用
+    this.currentGroup = null;  // 当前观众群（登场播报去重用）
     this.queue = [];          // 文字事件内容池（最近事件，供补充调用使用）
     this.visionQueue = [];    // 视觉事件（变化驱动 + 限速）
     this.buffer = [];         // 文字弹幕缓冲池：AI 一次回复多条，按节奏逐条吐出
@@ -99,6 +103,15 @@ class Brain {
     this.emitStatus(); // 停止状态即时广播（托盘/设置页感知）
   }
 
+  // app_switch 命中不同观众群 → 补发登场事件（AI 通道入队 / 本地模式直接播）
+  maybeEnterGroup(entry) {
+    if (entry.type !== 'app_switch') return null;
+    const group = resolveGroup(entry.appKey, this.config.monitor.appGroups, this.config.monitor.audienceGroups);
+    if (!group || group.name === this.currentGroup) return null;
+    this.currentGroup = group.name;
+    return { source: 'app', type: 'app_enter', name: group.name, appKey: entry.appKey, drive: '', isDir: false, ts: this.clock() };
+  }
+
   pushEntry(entry) {
     if (this.state.paused) return;
     if (entry.type === 'change') {
@@ -118,7 +131,15 @@ class Brain {
         if (this.changeSeen.size > 5000) this.changeSeen.clear();
       }
     }
+    // 事件场景化：文件事件打当时前台应用戳（弹幕评这条时仍是该观众群）。
+    // 只对文件操作类型戳；idle/app 事件无应用上下文（用全局观众池）
+    if (FILE_APP_TYPES.includes(entry.type) && !entry.appKey) {
+      const cur = this.getCurrentApp?.();
+      if (cur) entry.appKey = cur.appKey;
+    }
     if (this.state.localMode) {
+      const enter = this.maybeEnterGroup(entry);
+      if (enter) this.emitLocal(enter);
       this.emitLocal(entry);
       return;
     }
@@ -129,6 +150,8 @@ class Brain {
       this.flushVision();
     } else {
       // 文字：进内容池，缓冲不足时才补充调用（弹幕能续上就不打扰 AI）
+      const enter = this.maybeEnterGroup(entry);
+      if (enter) this.queue.push(enter);
       this.queue.push(entry);
       this.maybeRefill();
     }
@@ -237,7 +260,17 @@ class Brain {
 
   async generateText(batch) {
     const user = batch.map((e) => describeEntry(e, this.config.danmaku.readFileContent)).join('\n');
-    const system = buildSystemPrompt(currentStyles(this));
+    // 观众群：按批内事件的前台应用戳选群（无戳用全局池）
+    const appEntry = batch.find((e) => e.appKey);
+    const group = appEntry
+      ? resolveGroup(appEntry.appKey, this.config.monitor.appGroups, this.config.monitor.audienceGroups)
+      : null;
+    const system = buildSystemPrompt(
+      group?.styles?.length ? group.styles : currentStyles(this),
+      group?.roles || [],
+      this.config.danmaku.replyCount,
+      group?.scene || null
+    );
     try {
       const raw = await this.generator.chatCompletion({
         baseUrl: this.config.textModel.baseUrl,

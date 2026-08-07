@@ -39,3 +39,11 @@ test('buildSystemPrompt 含随机角色阵容与可配回复条数', () => {
   const p5 = buildSystemPrompt(['阴阳怪气损友'], [], 5);
   assert.ok(p5.includes('一次返回 5 条'));
 });
+
+test('buildSystemPrompt 场景注入', () => {
+  const noScene = buildSystemPrompt(['玩梗'], [], 10);
+  assert.ok(!noScene.includes('当前场景'));
+  const withScene = buildSystemPrompt(['玩梗'], ['秃头架构师'], 10, '你是一群程序员观众');
+  assert.ok(withScene.includes('当前场景：你是一群程序员观众'));
+  assert.ok(withScene.includes('秃头架构师'));
+});
