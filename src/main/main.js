@@ -227,4 +227,12 @@ if (!gotLock) {
   });
 
   app.on('window-all-closed', () => { /* 常驻托盘 */ });
+
+  // 退出清理：AppWatcher 的 Windows 长驻 PowerShell 进程不会随主进程自动退出，
+  // 不清理会残留孤儿进程每 2 秒轮询（文件/屏幕监控的句柄同样释放）
+  app.on('before-quit', () => {
+    appWatcher?.stop();
+    watcher?.stop();
+    screenWatcher?.stop();
+  });
 }
