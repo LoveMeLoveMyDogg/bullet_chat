@@ -582,7 +582,7 @@ git commit -m "feat: 调用统计 IPC 装配（settings:getUsageStats）"
     <h2>调用统计 <span class="hint-mark" data-tip="统计发送给 AI 的请求（含失败）。token 为估算值：按字符数/1.5 粗估（中英混合），视觉按截图大小另加；实际计费以你的 API 服务商为准。本统计不设上限、不拦截请求">？</span></h2>
     <button id="btn-refresh-usage">刷新</button>
     <div id="usage-summary"></div>
-    <div id="usage-channels"></div>
+    <div id="usage-channels" class="usage-channels"></div>
     <h3>近 7 天调用次数</h3>
     <div id="usage-chart" class="usage-chart"></div>
   </section>
