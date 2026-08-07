@@ -48,6 +48,13 @@ test('typeKey 映射', () => {
   assert.equal(typeKey({ type: 'screen', source: 'screen' }), 'screen');
 });
 
+test('typeKey 应用/空闲事件映射', () => {
+  assert.equal(typeKey({ source: 'app', type: 'app_switch' }), 'app_switch');
+  assert.equal(typeKey({ source: 'app', type: 'app_enter' }), 'app_enter');
+  assert.equal(typeKey({ source: 'app', type: 'app_stay' }), 'app_stay');
+  assert.equal(typeKey({ source: 'file', type: 'idle' }), 'idle');
+});
+
 test('事件风暴：首次补充后缓冲充足，不重复调用', async () => {
   const { brain, generator } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600; // 缓冲不自动吐，保持充足

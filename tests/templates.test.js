@@ -22,3 +22,12 @@ test('fillTemplate 替换占位符', () => {
   const noDrive = fillTemplate('「{name}」{loc}', { name: 'x', drive: '' });
   assert.equal(noDrive, '「x」');
 });
+
+test('应用/空闲事件模板池非空且可填充', () => {
+  for (const t of ['app_switch', 'app_enter', 'app_stay', 'idle']) {
+    const list = TEMPLATES[t];
+    assert.ok(Array.isArray(list) && list.length >= 20, `${t} 模板 ≥20 条`);
+    const text = fillTemplate(templateFor(t, () => 0), { name: 'VSCode', drive: '' });
+    assert.ok(text.length > 0 && text.length <= 24);
+  }
+});

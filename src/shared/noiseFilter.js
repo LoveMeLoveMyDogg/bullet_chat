@@ -59,6 +59,14 @@ function formatEventDescription(entry) {
       return `用户修改了「${name}」${loc}`;
     case 'screen':
       return '用户屏幕上的画面发生了变化';
+    case 'app_switch':
+      return `用户打开了「${name}」`;
+    case 'app_enter':
+      return `「${name}」进入直播间`;
+    case 'app_stay':
+      return `用户已在「${name}」停留 ${entry.minutes || '多'} 分钟`;
+    case 'idle':
+      return '屏幕已多分钟没有变化';
     default:
       return `用户对「${name}」做了什么${loc}`;
   }

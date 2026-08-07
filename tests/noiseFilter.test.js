@@ -39,3 +39,14 @@ test('formatEventDescription 各类型', () => {
   assert.equal(formatEventDescription(mk('change', 'a.txt', 'C:\\a.txt')), '用户修改了「a.txt」在C:');
   assert.equal(formatEventDescription({ ...mk('create', 'x', 'C:\\x'), isDir: true }), '用户新建了文件夹「x」在C:');
 });
+
+test('formatEventDescription 应用/空闲事件描述', () => {
+  const app = { source: 'app', type: 'app_switch', name: 'VSCode', drive: '' };
+  assert.equal(formatEventDescription(app), '用户打开了「VSCode」');
+  const enter = { source: 'app', type: 'app_enter', name: '程序员天团', drive: '' };
+  assert.equal(formatEventDescription(enter), '「程序员天团」进入直播间');
+  const stay = { source: 'app', type: 'app_stay', name: 'VSCode', drive: '', minutes: 20 };
+  assert.equal(formatEventDescription(stay), '用户已在「VSCode」停留 20 分钟');
+  const idle = { source: 'file', type: 'idle', name: '', drive: '' };
+  assert.equal(formatEventDescription(idle), '屏幕已多分钟没有变化');
+});
