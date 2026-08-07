@@ -18,13 +18,16 @@ class RequestLogger {
   }
 
   // channel: 'text' | 'vision'；input: 发送给模型的内容；reply: 模型原始回复；imageDataUrl: 视觉截图（可选）
-  logRequest({ channel, input, reply, imageDataUrl, error, parsedCount }) {
+  // paths: 该批次涉及的操作文件路径（去重、过滤空值）——供设置页对照噪音过滤规则配置
+  logRequest({ channel, input, reply, imageDataUrl, error, parsedCount, paths }) {
     const entry = {
       ts: new Date().toISOString(),
       channel,
       input: String(input || '').slice(0, 2000),
       reply: String(reply || '').slice(0, 500),
     };
+    const uniqPaths = paths ? [...new Set(paths.filter((p) => p))] : undefined;
+    if (uniqPaths && uniqPaths.length) entry.paths = uniqPaths;
     if (imageDataUrl) entry.image = this.saveImage(channel, imageDataUrl);
     if (error) entry.error = String(error).slice(0, 300);
     if (parsedCount !== undefined) entry.parsedCount = parsedCount;

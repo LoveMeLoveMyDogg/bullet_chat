@@ -276,6 +276,13 @@ async function renderRequestLogs() {
     body.className = 'req-body';
     body.textContent = `发送：${l.input}`;
     row.appendChild(body);
+    if (l.paths && l.paths.length) {
+      // 操作文件路径：对照噪音过滤规则配置（忽略这些路径/文件名的操作事件）
+      const paths = document.createElement('div');
+      paths.className = 'req-paths';
+      paths.textContent = '路径：' + l.paths.join(' ｜ ');
+      row.appendChild(paths);
+    }
     if (l.reply) {
       const rep = document.createElement('div');
       rep.className = 'req-body';

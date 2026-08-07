@@ -57,3 +57,20 @@ test('失败请求记录 error 字段', () => {
   assert.equal(l.reply, '');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('paths 字段记录操作文件路径（去重过滤空值）', () => {
+  const { dir, logger } = makeLogger();
+  logger.logRequest({
+    channel: 'text',
+    input: '用户修改了「a.txt」',
+    paths: ['/Users/szp/Documents/a.txt', '/Users/szp/Documents/b.log', '', '/Users/szp/Documents/a.txt'],
+  });
+  const l = logger.getLogs(1)[0];
+  assert.deepEqual(l.paths, ['/Users/szp/Documents/a.txt', '/Users/szp/Documents/b.log'], '去重且过滤空值');
+  const parsed = JSON.parse(fs.readFileSync(path.join(dir, 'requests.jsonl'), 'utf8').trim().split('\n')[0]);
+  assert.deepEqual(parsed.paths, l.paths, 'JSONL 落盘含 paths');
+  // 未传 paths 时无该字段（向后兼容）
+  logger.logRequest({ channel: 'text', input: 'x' });
+  assert.equal(logger.getLogs(1)[0].paths, undefined);
+  fs.rmSync(dir, { recursive: true, force: true });
+});

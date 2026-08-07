@@ -297,7 +297,7 @@ class Brain {
         system, user,
       });
       const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
-      this.logger?.logRequest({ channel: 'text', input: user, reply: raw, parsedCount: lines.length });
+      this.logger?.logRequest({ channel: 'text', input: user, reply: raw, parsedCount: lines.length, paths: batch.map((e) => e.path) });
       this.usageCounter?.record({ channel: 'text', inputChars: user.length, systemChars: system.length, outputChars: raw.length, parsedCount: lines.length });
       // 缓冲模式：解析结果全部进缓冲池，按节奏吐出（不立即全发）；超限丢最旧防积压
       if (lines.length) {
