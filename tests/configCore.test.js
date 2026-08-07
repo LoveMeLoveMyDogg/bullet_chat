@@ -91,3 +91,57 @@ test('saveConfigFile 后 loadConfigFile 往返', () => {
   assert.equal(back.textModel.apiKey, 'sk-abc');
   assert.equal(back.danmaku.localMode, true);
 });
+
+test('S1-5 损坏 JSON 触发 onCorrupt 且返回默认', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-cfg-'));
+  const file = path.join(dir, 'config.json');
+  fs.writeFileSync(file, '{ 这不是合法 JSON');
+  const corrupted = [];
+  const cfg = loadConfigFile(file, fs, dec, (info) => corrupted.push(info));
+  assert.equal(cfg.textModel.model, 'deepseek-chat', '损坏后回默认配置');
+  assert.equal(corrupted.length, 1);
+  assert.equal(corrupted[0].file, file);
+  assert.ok(corrupted[0].error instanceof Error);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('S1-5 正常 JSON 与缺失文件不触发 onCorrupt', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-cfg-'));
+  const file = path.join(dir, 'config.json');
+  const corrupted = [];
+  // 缺失（首次运行）：不算损坏
+  const miss = loadConfigFile(file, fs, dec, () => corrupted.push(1));
+  assert.equal(miss.textModel.model, 'deepseek-chat');
+  assert.equal(corrupted.length, 0, '缺失文件不触发');
+  // 正常内容
+  saveConfigFile(file, defaultConfig(), fs, enc);
+  loadConfigFile(file, fs, dec, () => corrupted.push(1));
+  assert.equal(corrupted.length, 0, '正常 JSON 不触发');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('S1-5 解密失败视为损坏（safeStorage 密钥变化场景）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-cfg-'));
+  const file = path.join(dir, 'config.json');
+  const cfg = defaultConfig();
+  cfg.textModel.apiKey = 'sk-x';
+  saveConfigFile(file, cfg, fs, enc);
+  const corrupted = [];
+  // 用永远抛错的 decrypter 模拟系统密钥变化后旧密文不可解
+  const badDec = () => { throw new Error('decrypt failed'); };
+  const out = loadConfigFile(file, fs, badDec, (info) => corrupted.push(info));
+  assert.equal(corrupted.length, 1, '解密失败走损坏路径');
+  assert.equal(out.textModel.apiKey, '', '回默认（明文 key 为空）');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('S1-5 未传 onCorrupt 时不抛异常（向后兼容）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-cfg-'));
+  const file = path.join(dir, 'config.json');
+  fs.writeFileSync(file, '{bad');
+  assert.doesNotThrow(() => {
+    const cfg = loadConfigFile(file, fs, dec);
+    assert.equal(cfg.textModel.model, 'deepseek-chat');
+  });
+  fs.rmSync(dir, { recursive: true, force: true });
+});

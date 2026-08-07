@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const THROTTLE_MS = 30000;
-const SOURCE_LABELS = { text: '文字模型', vision: '视觉模型', watch: '监控', screen: '屏幕截图' };
+const SOURCE_LABELS = { text: '文字模型', vision: '视觉模型', watch: '监控', screen: '屏幕截图', config: '配置' };
 
 function sourceLabel(source) {
   return SOURCE_LABELS[source] || source;

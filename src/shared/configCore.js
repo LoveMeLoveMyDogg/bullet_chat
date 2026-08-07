@@ -54,11 +54,14 @@ function parseConfig(json, decrypter) {
   return merged;
 }
 
-function loadConfigFile(file, fsMod, decrypter) {
+// 读取配置：文件不存在（首次运行）返回默认且不视为损坏；
+// JSON 解析失败或解密失败（如 safeStorage 密钥变化）时，若提供 onCorrupt 则回调告知，随后返回默认
+function loadConfigFile(file, fsMod, decrypter, onCorrupt = null) {
   try {
     const raw = fsMod.readFileSync(file, 'utf8');
     return parseConfig(JSON.parse(raw), decrypter);
-  } catch {
+  } catch (err) {
+    if (err.code !== 'ENOENT') onCorrupt?.({ file, error: err });
     return defaultConfig();
   }
 }

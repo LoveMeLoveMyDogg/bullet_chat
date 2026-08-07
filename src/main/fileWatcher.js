@@ -78,7 +78,7 @@ class FileWatcher {
     this.watchers = new Map(); // root -> fs.FSWatcher
     this.seenMtimes = new Map(); // path -> mtimeMs（区分新建/修改，macOS 全 rename 场景）
     this.stopped = false;
-    this.remountTimer = null;
+    this.remountTimers = new Map(); // root -> 重挂定时器（每 root 独立，互不覆盖）
   }
 
   handleEvent(root, eventType, filename) {
@@ -112,7 +112,10 @@ class FileWatcher {
     this.onError?.(new Error(`监控 ${root} 失效：${err.message}`));
     try { this.watchers.get(root)?.close(); } catch { /* 已失效 */ }
     this.watchers.delete(root);
-    this.remountTimer = setTimeout(() => {
+    // 每 root 独立重挂定时器：两个盘符先后失效互不覆盖（旧实现单槽会丢先失效的根）
+    clearTimeout(this.remountTimers.get(root));
+    const timer = setTimeout(() => {
+      this.remountTimers.delete(root);
       if (this.stopped) return;
       try {
         const w = fs.watch(root, { recursive: true }, (eventType, filename) => {
@@ -125,12 +128,14 @@ class FileWatcher {
         this.onError?.(new Error(`重新监听 ${root} 失败：${e2.message}`));
       }
     }, 5000);
+    timer.unref?.();
+    this.remountTimers.set(root, timer);
   }
 
   stop() {
     this.stopped = true;
-    clearTimeout(this.remountTimer);
-    this.remountTimer = null;
+    for (const t of this.remountTimers.values()) clearTimeout(t);
+    this.remountTimers.clear();
     for (const w of this.watchers.values()) {
       try { w.close(); } catch { /* 忽略 */ }
     }

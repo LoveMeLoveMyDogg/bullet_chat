@@ -368,3 +368,122 @@ test('批量吐出：批大小不超过同屏上限与缓冲余量', async () =>
   assert.equal(danmaku.length, 2, '缓冲余量 2 条，全出');
   brain.stop();
 });
+
+test('S1-1 队列级去重：同 path+type 多条入队，一次补充只发一条', async () => {
+  const { brain, generator } = makeEnv();
+  let lastUser = '';
+  generator.chatCompletion = async ({ user }) => { generator.textCalls++; lastUser = user; return '["1"]'; };
+  brain.config.danmaku.minIntervalSec = 3600; // 缓冲不自动吐
+  brain.config.danmaku.batchIntervalMs = 0;   // 不节流，直接补充
+  // 同路径 3 条 change 同时积压在内容池（模拟事件风暴：去抖窗口外的连续写入）
+  brain.queue = [
+    entry('change', { path: 'C:\\a.txt' }),
+    entry('change', { path: 'C:\\a.txt' }),
+    entry('change', { path: 'C:\\a.txt' }),
+  ];
+  brain.maybeRefill();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 1, '一次补充调用');
+  assert.equal((lastUser.match(/用户修改了/g) || []).length, 1, '同路径 change 只发一条描述');
+  brain.stop();
+});
+
+test('S1-1 队列级去重：不同 type 同路径都保留（新建→修改叙事）', async () => {
+  const { brain, generator } = makeEnv();
+  let lastUser = '';
+  generator.chatCompletion = async ({ user }) => { lastUser = user; return '["1"]'; };
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  brain.queue = [
+    entry('create', { path: 'C:\\a.txt' }),
+    entry('change', { path: 'C:\\a.txt' }),
+    entry('create', { path: 'C:\\b.txt' }),
+  ];
+  brain.maybeRefill();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(lastUser.split('\n').length, 3, '不同 type 同路径不合并');
+  assert.ok(lastUser.includes('新建') && lastUser.includes('修改'));
+  brain.stop();
+});
+
+test('S1-1 队列级去重：同键多条时保留最后一条的位置', async () => {
+  const { brain, generator } = makeEnv();
+  let lastUser = '';
+  generator.chatCompletion = async ({ user }) => { lastUser = user; return '["1"]'; };
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  // 顺序：change(a) → create(a) → change(a)：同键 change 让位，结果应为 create(a) → change(a)
+  brain.queue = [
+    entry('change', { path: 'C:\\a.txt' }),
+    entry('create', { path: 'C:\\a.txt' }),
+    entry('change', { path: 'C:\\a.txt' }),
+  ];
+  brain.maybeRefill();
+  await new Promise((r) => setTimeout(r, 20));
+  const lines = lastUser.split('\n');
+  assert.equal(lines.length, 2, 'change 只剩最新一条');
+  assert.ok(lines[0].includes('新建'), '首条是 create（叙事保留）');
+  assert.ok(lines[1].includes('修改'), '末条是最新的 change');
+  brain.stop();
+});
+
+test('S1-2 changeSeen 剪枝：超限清理 60 秒前的旧条目', () => {
+  let fakeNow = 1000000;
+  const { brain } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600; // 不触发补充噪声
+  // 100 条旧条目（t=0）
+  for (let i = 0; i < 100; i++) brain.pushEntry(entry('change', { path: `C:\\old-${i}.txt` }));
+  assert.equal(brain.changeSeen.size, 100);
+  fakeNow += 100000; // 100 秒后：旧条目全部超龄
+  // 再灌 5000 条新条目 → 100 + 5000 = 5100 > 5000 → 剪掉 100 条旧的
+  for (let i = 0; i < 5000; i++) brain.pushEntry(entry('change', { path: `C:\\new-${i}.txt` }));
+  assert.ok(brain.changeSeen.size <= 5000, '清理后回落至上限内');
+  assert.equal(brain.changeSeen.has('C:\\old-0.txt'), false, '超龄条目被清除');
+  assert.equal(brain.changeSeen.has('C:\\new-0.txt'), true, '新条目保留');
+  brain.stop();
+});
+
+test('S1-2 changeSeen 剪枝：清理后同路径 change 重新计为新事件', () => {
+  let fakeNow = 1000000;
+  const { brain, generator } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  brain.pushEntry(entry('change', { path: 'C:\\a.txt' }));
+  assert.ok(brain.changeSeen.has('C:\\a.txt'));
+  fakeNow += 100000; // 超龄
+  // 灌满触发剪枝：1 条旧 + 5099 条新 = 5100 > 5000 → 剪掉旧条目（清后 5099 ≤ 上限，不触发全清）
+  for (let i = 0; i < 5099; i++) brain.pushEntry(entry('change', { path: `C:\\x-${i}.txt` }));
+  assert.equal(brain.changeSeen.has('C:\\a.txt'), false, '超龄条目被清理');
+  // 同路径再次 change：应被当作新事件进入队列
+  brain.queue.length = 0;
+  brain.pushEntry(entry('change', { path: 'C:\\a.txt' }));
+  assert.equal(brain.queue.length, 1, '清理后同路径 change 重新入队');
+  brain.stop();
+});
+
+test('S1-2 changeSeen 剪枝：清后仍超限则全清（优雅降级）', () => {
+  let fakeNow = 1000000;
+  const { brain } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600;
+  // 同一时刻灌入 6000 条全新条目：剪枝删不掉任何条目 → 全清，绝不突破上限
+  for (let i = 0; i < 6000; i++) brain.pushEntry(entry('change', { path: `C:\\f-${i}.txt` }));
+  assert.ok(brain.changeSeen.size <= 5000, '全清后不突破上限');
+  brain.stop();
+});
+
+test('S1-3 双 start 只产生一条重试链（守卫防重复调度）', () => {
+  const { brain } = makeEnv(); // makeEnv 已 start 一次
+  let retrySchedules = 0;
+  const orig = brain.scheduleRetry;
+  brain.scheduleRetry = () => { retrySchedules++; orig.call(brain); };
+  brain.start(); // 重复 start：守卫应直接返回，不再调度
+  assert.equal(retrySchedules, 0, '重复 start 不应再次调度重试链');
+  brain.stop();
+});
+
+test('S1-3 stop 后状态广播为 idle（托盘/设置页即时感知）', () => {
+  const { brain, statuses } = makeEnv();
+  statuses.length = 0;
+  brain.stop();
+  assert.equal(statuses[statuses.length - 1].mode, 'idle');
+});

@@ -1,7 +1,7 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const {
-  ApiError, chatCompletion, visionCompletion, parseDanmakuJson,
+  ApiError, friendlyError, chatCompletion, visionCompletion, parseDanmakuJson,
   testTextConnection, testVisionConnection, parseResponsesReply, resetEndpointCache,
 } = require('../src/main/generator');
 
@@ -196,4 +196,48 @@ test('parseResponsesReply 提取 output_text', () => {
   assert.equal(parseResponsesReply({ output: [{ type: 'reasoning' }] }), '');
   assert.equal(parseResponsesReply({ output_text: '兜底' }), '兜底');
   assert.equal(parseResponsesReply({}), '');
+});
+
+test('S1-6 friendlyError 状态码分支与 ApiError.status 字段', () => {
+  const cases = [
+    [401, 'auth'], [402, 'balance'], [404, 'model'], [429, 'rate'],
+    [500, 'server'], [503, 'server'], [599, 'server'],
+    [418, 'http'], [0, 'http'],
+  ];
+  for (const [status, code] of cases) {
+    const e = friendlyError(status);
+    assert.ok(e instanceof ApiError, `${status} 应抛 ApiError`);
+    assert.equal(e.code, code, `${status} → ${code}`);
+    assert.equal(e.status, status, 'status 字段保留原始 HTTP 码');
+    assert.ok(e.message.length > 0);
+  }
+  // 各类提示语关键信息
+  assert.ok(friendlyError(402).message.includes('余额不足'));
+  assert.ok(friendlyError(404).message.includes('模型名不存在'));
+  assert.ok(friendlyError(429).message.includes('429'));
+  assert.ok(friendlyError(503).message.includes('HTTP 503'));
+});
+
+test('S1-6 请求超时归类为 timeout（AbortError → ApiError 408）', async () => {
+  const restore = mockFetch(async () => {
+    const err = new Error('The operation was aborted due to timeout');
+    err.name = 'TimeoutError';
+    throw err;
+  });
+  try {
+    await assert.rejects(
+      () => chatCompletion({ baseUrl: 'b', apiKey: 'k', model: 'm', system: 's', user: 'u' }),
+      (e) => e instanceof ApiError && e.code === 'timeout' && e.status === 408 && e.message.includes('超时')
+    );
+  } finally { restore(); }
+});
+
+test('S1-6 5xx 服务端错误走 friendlyError 并携带状态码', async () => {
+  const restore = mockFetch(async () => ({ ok: false, status: 503, text: async () => 'unavailable' }));
+  try {
+    await assert.rejects(
+      () => chatCompletion({ baseUrl: 'b', apiKey: 'k', model: 'm', system: 's', user: 'u' }),
+      (e) => e instanceof ApiError && e.code === 'server' && e.status === 503 && e.message.includes('服务端错误')
+    );
+  } finally { restore(); }
 });

@@ -17,8 +17,8 @@ const decrypter = (buf) => safeStorage.isEncryptionAvailable()
   ? safeStorage.decryptString(buf)
   : buf.toString('utf8');
 
-function loadConfig() {
-  return loadConfigFile(configPath(), fs, decrypter);
+function loadConfig(onCorrupt) {
+  return loadConfigFile(configPath(), fs, decrypter, onCorrupt);
 }
 
 function saveConfig(cfg) {

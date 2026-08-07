@@ -1,4 +1,5 @@
 const { app, ipcMain, Notification, BrowserWindow, shell } = require('electron');
+const fs = require('node:fs');
 const path = require('node:path');
 const { createTray } = require('./tray');
 const { loadConfig, saveConfig } = require('./config');
@@ -100,7 +101,6 @@ if (!gotLock) {
   });
 
   app.whenReady().then(() => {
-    config = loadConfig();
     // 状态广播统一走 reporter 状态形状 {state,text}（设置窗口状态条消费该结构）
     const broadcastStatus = (s) => {
       for (const win of BrowserWindow.getAllWindows()) win.webContents.send('status-changed', s);
@@ -109,6 +109,17 @@ if (!gotLock) {
       notify,
       logDir: path.join(app.getPath('userData'), 'logs'),
       onStatus: broadcastStatus,
+    });
+
+    // 损坏配置：备份原文件 + 显式提示（走 reporter 通道，通知与设置页状态条同时可见）。
+    // 文件不存在（首次运行）不算损坏，不会走到这里
+    config = loadConfig(({ file }) => {
+      let backup = file;
+      try {
+        backup = `${file}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+        fs.renameSync(file, backup);
+      } catch { /* 备份失败不阻塞（原文件可能已不可读） */ }
+      reporter.reportError('config', new Error(`配置文件损坏，已备份为 ${path.basename(backup)} 并恢复默认设置`));
     });
 
     // 请求日志：发送给文字/视觉模型的输入与回复 + 截图存档（设置页可查看）

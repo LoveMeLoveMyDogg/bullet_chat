@@ -76,26 +76,27 @@ class Brain {
     this.changeSeen = new Map(); // path -> lastChangeTime
     this.lastTextEmit = 0;   // 本地模式弹幕最后发送时间
     this.lastVisionEmit = 0; // 视觉弹幕最后发送时间（独立限速，避免视觉高频烧额度）
-    this.batchTimer = null;
     this.retryTimer = null;
     this.lastVisionImage = null; // 最近一次视觉请求的截图，重试探测用它而非空图
     this.state = { mode: 'idle', paused: false, localMode: !!config.danmaku.localMode, error: { text: null, vision: null } };
   }
 
   start() {
+    if (this.state.mode === 'running') return; // 防重复 start 产生第二条重试定时器链
     this.state.mode = 'running';
     this.scheduleRetry();
     this.emitStatus();
   }
 
   stop() {
-    clearTimeout(this.batchTimer);
     clearTimeout(this.retryTimer);
+    this.retryTimer = null;
     clearTimeout(this.refillTimer);
     this.refillTimer = null;
     clearTimeout(this.emitTimer);
     this.emitTimer = null;
     this.state.mode = 'idle';
+    this.emitStatus(); // 停止状态即时广播（托盘/设置页感知）
   }
 
   pushEntry(entry) {
@@ -108,6 +109,14 @@ class Brain {
         return;
       }
       this.changeSeen.set(entry.path, now);
+      // 防长期运行内存增长：超限清理 60 秒前的旧条目；清后仍超限则全清（与 fileWatcher 优雅降级一致）
+      if (this.changeSeen.size > 5000) {
+        const cutoff = now - 60000;
+        for (const [p, t] of this.changeSeen) {
+          if (t < cutoff) this.changeSeen.delete(p);
+        }
+        if (this.changeSeen.size > 5000) this.changeSeen.clear();
+      }
     }
     if (this.state.localMode) {
       this.emitLocal(entry);
@@ -156,11 +165,25 @@ class Brain {
       this.queue = this.queue.filter((e) => now - (e.ts || now) <= maxAgeMs);
       if (this.queue.length === 0) return;
     }
-    const batch = this.queue.splice(0, BATCH_SIZE);
-    if (batch.length === 0) return;
+    const raw = this.queue.splice(0, BATCH_SIZE);
+    if (raw.length === 0) return;
+    // 队列级同路径去重：同 path+type 只留最新一条。
+    // describeEntry 读文件当前内容，旧 change 事件描述冗余；不同 type（如"新建→修改"）保留叙事。
+    // stable：保留该键最后一次出现的位置，其余条目顺序不变
+    const seen = new Map(); // key -> 该键最后出现位置在 batch 中的下标
+    const batch = [];
+    for (const e of raw) {
+      const key = `${e.path}\u0000${e.type}`;
+      const prev = seen.get(key);
+      if (prev !== undefined) batch[prev] = null; // 旧条目让位给最新一条
+      seen.set(key, batch.length);
+      batch.push(e);
+    }
+    const deduped = batch.filter(Boolean);
+    if (deduped.length === 0) return;
     this.lastRefillAt = now;
     this.refilling = true;
-    this.generateText(batch).finally(() => {
+    this.generateText(deduped).finally(() => {
       this.refilling = false;
       this.maybeRefill(); // 补充完成后再检查（内容池可能又有新事件且缓冲仍不足）
     });

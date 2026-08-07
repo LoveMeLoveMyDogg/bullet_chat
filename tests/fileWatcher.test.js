@@ -127,3 +127,41 @@ test('filter 为 true 的事件被丢弃', async (t) => {
   await new Promise((r) => setTimeout(r, 300));
   assert.equal(events.length, 0);
 });
+
+test('S1-4 remount 每 root 独立：两 root 并发失效后都重挂成功', async (t) => {
+  const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-rm-a-'));
+  const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-rm-b-'));
+  const recovered = [];
+  const fw = new FileWatcher({
+    drives: [rootA, rootB],
+    filter: () => false,
+    onEvent: () => {},
+    onError: () => {},
+    onRecovered: (root) => recovered.push(root),
+  });
+  t.after(() => fw.stop());
+  fw.start();
+  await settle();
+  // 两个盘符先后失效（旧实现单槽会互相覆盖，先失效的 root 永不重挂）
+  fw.remount(rootA, new Error('模拟失效 A'));
+  fw.remount(rootB, new Error('模拟失效 B'));
+  assert.equal(fw.watchers.size, 0, '失效后两 root 都被移除');
+  assert.equal(fw.remountTimers.size, 2, '两个 root 各有独立重挂定时器');
+  await new Promise((r) => setTimeout(r, 5200)); // 等 5 秒重挂窗口
+  assert.equal(fw.watchers.size, 2, '两个 root 都重挂成功');
+  assert.deepEqual([...recovered].sort(), [rootA, rootB].sort(), '两 root 都上报恢复');
+  assert.equal(fw.remountTimers.size, 0, '定时器回调触发后从 Map 移除');
+});
+
+test('S1-4 stop 清理所有 remount 定时器', (t) => {
+  const rootA = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-rm-a-'));
+  const rootB = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-rm-b-'));
+  const fw = new FileWatcher({ drives: [rootA, rootB], filter: () => false, onEvent: () => {} });
+  t.after(() => fw.stop());
+  fw.start();
+  fw.remount(rootA, new Error('x'));
+  fw.remount(rootB, new Error('x'));
+  assert.equal(fw.remountTimers.size, 2);
+  fw.stop();
+  assert.equal(fw.remountTimers.size, 0, 'stop 后不残留定时器');
+});

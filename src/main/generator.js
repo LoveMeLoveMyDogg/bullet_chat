@@ -212,7 +212,7 @@ async function testVisionConnection(cfg, redImageDataUrl = RED_SQUARE_DATA_URL) 
 }
 
 module.exports = {
-  ApiError, chatCompletion, visionCompletion, parseDanmakuJson,
+  ApiError, friendlyError, chatCompletion, visionCompletion, parseDanmakuJson,
   testTextConnection, testVisionConnection, RED_SQUARE_DATA_URL,
   parseChatReply, parseResponsesReply, resetEndpointCache,
 };
