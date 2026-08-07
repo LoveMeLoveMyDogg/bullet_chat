@@ -15,6 +15,7 @@ contextBridge.exposeInMainWorld('settings', {
   testText: (cfg) => ipcRenderer.invoke('settings:testText', cfg),
   testVision: (cfg) => ipcRenderer.invoke('settings:testVision', cfg),
   getStatus: () => ipcRenderer.invoke('settings:getStatus'),
+  getUsageStats: () => ipcRenderer.invoke('settings:getUsageStats'),
   getDisplays: () => ipcRenderer.invoke('settings:getDisplays'),
   getDisplayPreview: (id) => ipcRenderer.invoke('settings:getDisplayPreview', id),
   getRequestLogs: () => ipcRenderer.invoke('settings:getRequestLogs'),

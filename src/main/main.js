@@ -16,6 +16,7 @@ const { AppWatcher } = require('./appWatcher');
 const { ImageProcessor } = require('./imageProcessor');
 const { startDemo, stopDemo } = require('./demoMode');
 const { RequestLogger } = require('./requestLogger');
+const { UsageCounter } = require('../shared/usageCounter');
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'preload.js');
 
@@ -140,12 +141,16 @@ if (!gotLock) {
     // 请求日志：发送给文字/视觉模型的输入与回复 + 截图存档（设置页可查看）
     const logger = new RequestLogger({ logDir: path.join(app.getPath('userData'), 'logs') });
 
+    // 调用统计：只记录发给 AI 的请求（含失败），探测请求不计
+    const usage = new UsageCounter({ dir: path.join(app.getPath('userData'), 'usage') });
+
     brain = new Brain({
       config,
       generator: require('./generator'),
       templates,
       reporter,
       logger,
+      usageCounter: usage,
       getCurrentApp: () => appWatcher?.getCurrent() || null,
       onDanmaku: (text, meta) => stage?.send(text, meta),
     });
@@ -168,6 +173,7 @@ if (!gotLock) {
     ipcMain.handle('settings:testText', (_e, cfg) => testTextConnection(cfg || config.textModel));
     ipcMain.handle('settings:testVision', (_e, cfg) => testVisionConnection(cfg || config.visionModel));
     ipcMain.handle('settings:getStatus', () => reporter.getStatus());
+    ipcMain.handle('settings:getUsageStats', () => ({ today: usage.getToday(), history: usage.getHistory(7) }));
     ipcMain.handle('settings:getRequestLogs', () => logger.getLogs());
     ipcMain.handle('settings:openLogDir', () => {
       const dir = path.join(app.getPath('userData'), 'logs');
