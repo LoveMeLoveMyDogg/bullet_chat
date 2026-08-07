@@ -15,7 +15,10 @@ function buildMenu({ onQuit, onOpenSettings, onTogglePause, onToggleLocalMode, o
 }
 
 function createTray(opts) {
-  const icon = nativeImage.createFromPath(path.join(__dirname, '..', '..', 'assets', 'tray.png'));
+  // 图标：macOS 用黑色 template（系统自动适配深浅色菜单栏）；
+  // Windows 无 template 机制，纯黑气泡在深色任务栏不可见，用彩色版
+  const iconName = process.platform === 'darwin' ? 'tray.png' : 'tray-win.png';
+  const icon = nativeImage.createFromPath(path.join(__dirname, '..', '..', 'assets', iconName));
   // macOS 菜单栏用 template image（黑色+透明），系统自动适配深浅色模式
   if (process.platform === 'darwin') icon.setTemplateImage(true);
   const tray = new Tray(icon);
