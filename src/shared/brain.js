@@ -235,6 +235,18 @@ class Brain {
 
   // 弹幕吐出：按 minIntervalSec 节奏一批批飘（每批 burstMin~burstMax 条随机，像直播间弹幕雨）。
   // 批大小受同屏上限（maxConcurrent）与缓冲余量约束；补充后第一批立即出（不等满间隔）
+  // 弹幕缓冲上限：防生成速率 > 消耗速率时积压（视觉通道高频场景每 10s +10 条 vs 消耗 2~3 条）。
+  // 超限丢最旧保留最新（直播语义：弹幕是即时的，积压的旧弹幕没意义，最新弹幕才有价值）
+  bufferLimit() {
+    return Math.max(10, (this.config.danmaku.burstMax || 8) * 5);
+  }
+
+  pushBuffer(lines) {
+    this.buffer.push(...lines);
+    const limit = this.bufferLimit();
+    if (this.buffer.length > limit) this.buffer.splice(0, this.buffer.length - limit);
+  }
+
   scheduleEmit() {
     if (this.emitTimer || this.state.paused) return;
     const sinceLast = this.lastEmitAt ? this.clock() - this.lastEmitAt : Infinity;
@@ -287,9 +299,9 @@ class Brain {
       const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
       this.logger?.logRequest({ channel: 'text', input: user, reply: raw, parsedCount: lines.length });
       this.usageCounter?.record({ channel: 'text', inputChars: user.length, systemChars: system.length, outputChars: raw.length, parsedCount: lines.length });
-      // 缓冲模式：解析结果全部进缓冲池，按节奏吐出（不立即全发）
+      // 缓冲模式：解析结果全部进缓冲池，按节奏吐出（不立即全发）；超限丢最旧防积压
       if (lines.length) {
-        this.buffer.push(...lines);
+        this.pushBuffer(lines);
         this.scheduleEmit();
       }
       if (this.state.error.text) this.clearError('text');
@@ -318,10 +330,10 @@ class Brain {
       const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
       this.lastVisionEmit = this.clock(); // 视觉调用限速标记（minIntervalVisionSec 闸门用）
       this.usageCounter?.record({ channel: 'vision', inputChars: 0, systemChars: system.length, outputChars: raw.length, parsedCount: lines.length, imageKb: dataUrlKb(entry.imageDataUrl) });
-      // 视觉弹幕也进缓冲：飘出节奏与文字统一（burstMin/burstMax + minIntervalSec 全局生效）。
-      // 旧实现一次回复全部瞬间飘出——"一次飘出条数范围"对视觉通道失效，且同屏堆积重叠
+      // 视觉弹幕也进缓冲：飘出节奏与文字统一（burstMin/burstMax + minIntervalSec 全局生效），
+      // 超限丢最旧防积压（旧实现一次回复全部瞬间飘出，且高频画面变化时 buffer 无限增长）
       if (lines.length) {
-        this.buffer.push(...lines);
+        this.pushBuffer(lines);
         this.scheduleEmit();
       }
       if (this.state.error.vision) this.clearError('vision');

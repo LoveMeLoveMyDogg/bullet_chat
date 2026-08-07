@@ -654,3 +654,39 @@ test('调用统计：视觉通道计数（system 不重复计、截图 KB 计 to
   brain.stop();
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('缓冲上限：超限丢最旧保留最新（防视觉高频积压）', () => {
+  const { brain } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600; // 不消耗，纯观察
+  brain.config.danmaku.burstMax = 3;          // 上限 = max(10, 3*5) = 15
+  brain.pushBuffer(Array.from({ length: 15 }, (_, i) => `弹幕${i}`));
+  assert.equal(brain.buffer.length, 15);
+  brain.pushBuffer(['新1', '新2']);
+  assert.equal(brain.buffer.length, 15, '超限截断');
+  assert.ok(!brain.buffer.includes('弹幕0') && !brain.buffer.includes('弹幕1'), '最旧被丢');
+  assert.ok(brain.buffer.includes('新2'), '最新保留');
+  // 小 burstMax 时下限 10 兜底
+  brain.config.danmaku.burstMax = 1;
+  assert.equal(brain.bufferLimit(), 10, '上限不低于 10');
+  brain.stop();
+});
+
+test('缓冲上限：文字与视觉生成都走 pushBuffer', async () => {
+  const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  const calls = [];
+  const orig = brain.pushBuffer.bind(brain);
+  brain.pushBuffer = (lines) => { calls.push([...lines]); orig(lines); };
+  // 文字通道
+  generator.chatCompletion = async () => '["文字1"]';
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(calls[0], ['文字1'], '文字生成走 pushBuffer');
+  // 视觉通道
+  generator.visionCompletion = async () => '["视觉1"]';
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.deepEqual(calls[1], ['视觉1'], '视觉生成走 pushBuffer');
+  brain.stop();
+});
