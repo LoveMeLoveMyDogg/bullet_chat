@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { Brain, typeKey } = require('../src/shared/brain');
+const { UsageCounter } = require('../src/shared/usageCounter');
 const { defaultConfig } = require('../src/shared/configCore');
 const templates = require('../src/shared/templates');
 
@@ -557,4 +558,29 @@ test('停留/空闲事件进文字队列并带时间戳', async () => {
   assert.equal(brain.queue.length, 2);
   assert.ok(brain.queue[0].ts > 0, '带到达时间戳（时间窗过滤用）');
   brain.stop();
+});
+
+test('调用统计：成功与失败都记录，探测不计数', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-usage-'));
+  const uc = new UsageCounter({ dir, clock: () => 0, fsMod: fs });
+  const { brain, generator } = makeEnv({ usageCounter: uc });
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  // 成功
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  const afterSuccess = uc.getToday().text.calls;
+  assert.equal(afterSuccess, 1);
+  // 失败
+  generator.chatCompletion = async () => { throw new Error('挂了'); };
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(uc.getToday().text.calls, 2, '失败也计数');
+  assert.equal(uc.getToday().text.failed, 1);
+  // 探测请求不计数
+  brain.retryNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(uc.getToday().text.calls, 2, 'retryNow 探测不计数');
+  brain.stop();
+  fs.rmSync(dir, { recursive: true, force: true });
 });

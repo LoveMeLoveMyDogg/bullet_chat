@@ -3,6 +3,7 @@ const { pickStyles, pickRoles, buildSystemPrompt } = require('./styles');
 const { templateFor, fillTemplate } = require('./templates');
 const { resolveGroup } = require('./audienceGroups');
 const { parseDanmakuJson, RED_SQUARE_DATA_URL } = require('../main/generator');
+const { dataUrlKb } = require('./usageCounter');
 const fs = require('node:fs');
 
 const BATCH_SIZE = 10;
@@ -57,12 +58,13 @@ function currentStyles(brain) {
 }
 
 class Brain {
-  constructor({ config, generator, templates, reporter, logger = null, clock = Date.now, rng = Math.random, onDanmaku, onStatus, getCurrentApp = null }) {
+  constructor({ config, generator, templates, reporter, logger = null, clock = Date.now, rng = Math.random, onDanmaku, onStatus, getCurrentApp = null, usageCounter = null }) {
     this.config = config;
     this.generator = generator;
     this.templates = templates;
     this.reporter = reporter;
     this.logger = logger; // 请求日志（发送给 AI 的内容/截图/回复），可选
+    this.usageCounter = usageCounter; // 调用统计（成功/失败都记；retryNow 探测不记），可选
     this.clock = clock;
     this.rng = rng;
     this.onDanmaku = onDanmaku;
@@ -280,6 +282,7 @@ class Brain {
       });
       const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
       this.logger?.logRequest({ channel: 'text', input: user, reply: raw, parsedCount: lines.length });
+      this.usageCounter?.record({ channel: 'text', inputChars: user.length, systemChars: system.length, outputChars: raw.length, parsedCount: lines.length });
       // 缓冲模式：解析结果全部进缓冲池，按节奏吐出（不立即全发）
       if (lines.length) {
         this.buffer.push(...lines);
@@ -289,6 +292,7 @@ class Brain {
       this.emitStatus();
     } catch (err) {
       this.logger?.logRequest({ channel: 'text', input: user, error: err.message });
+      this.usageCounter?.record({ channel: 'text', inputChars: user.length, systemChars: system.length, error: err });
       this.fail('text', err);
     }
   }
@@ -307,23 +311,26 @@ class Brain {
         maxCount: this.config.danmaku.replyCount || 10,
       });
       this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', reply: raw, imageDataUrl: entry.imageDataUrl });
-      this.emitParsed(raw, 'vision');
+      const parsedCount = this.emitParsed(raw, 'vision');
+      this.usageCounter?.record({ channel: 'vision', inputChars: system.length, systemChars: system.length, outputChars: raw.length, parsedCount, imageKb: dataUrlKb(entry.imageDataUrl) });
     } catch (err) {
       this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', imageDataUrl: entry.imageDataUrl, error: err.message });
+      this.usageCounter?.record({ channel: 'vision', inputChars: system.length, systemChars: system.length, error: err, imageKb: dataUrlKb(entry.imageDataUrl) });
       this.fail('vision', err);
     }
   }
 
-  // 视觉弹幕：直接发送（画面弹幕实时性优先）
+  // 视觉弹幕：直接发送（画面弹幕实时性优先）；返回解析条数（调用统计用）
   emitParsed(raw, src) {
     const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
-    if (lines.length === 0) return;
+    if (lines.length === 0) return 0;
     this.lastVisionEmit = this.clock();
     for (const line of lines) {
       this.onDanmaku(line, { source: 'ai' });
     }
     if (this.state.error[src]) this.clearError(src);
     this.emitStatus();
+    return lines.length;
   }
 
   emitLocal(entry) {
