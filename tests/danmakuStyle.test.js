@@ -41,7 +41,7 @@ test('durationFor 倍速缩放与兜底', () => {
   assert.equal(durationFor('fly', 0.1), 90000); // 极慢：0.1 下限生效
 });
 
-const { laneTopFor } = require('../src/shared/danmakuStyle');
+const { laneTopFor, laneCountFor } = require('../src/shared/danmakuStyle');
 
 test('laneTopFor 三种位置与默认', () => {
   // 顶部（默认）：固定从 6 开始，间距 78
@@ -54,4 +54,38 @@ test('laneTopFor 三种位置与默认', () => {
   // 全屏：均匀分布
   assert.equal(laneTopFor('full', 0, 6, 600), 6);
   assert.equal(laneTopFor('full', 3, 6, 600), Math.round(600 / 6 * 3) + 6);
+});
+
+test('laneCountFor top/middle 收敛到顶部/中部区域（40% 视口高）', () => {
+  // 用户场景：maxConcurrent=10、1112px 屏 → 顶部只放得下 5 条（78px 间距）
+  assert.equal(laneCountFor('top', 10, 1112), 5);
+  assert.equal(laneCountFor('middle', 10, 1112), 5);
+  // 默认 600px 视口 → 3 条
+  assert.equal(laneCountFor('top', 6, 600), 3);
+  // 轨道数小于上限时保持原值
+  assert.equal(laneCountFor('top', 2, 1112), 2);
+  // 至少 1 条
+  assert.equal(laneCountFor('top', 1, 100), 1);
+  // 未知位置回退顶部
+  assert.equal(laneCountFor(undefined, 6, 600), 3);
+});
+
+test('laneCountFor full 全屏：只受屏幕高度约束', () => {
+  assert.equal(laneCountFor('full', 10, 1112), 10); // 10 条未超屏
+  assert.equal(laneCountFor('full', 20, 1112), 14); // 超过屏高上限截断
+});
+
+test('顶部/中间位置：轨道块落在对应区域内', () => {
+  const H = 1112;
+  // top：末条轨道底部不超出顶部区域（40% 视口高）
+  const n = laneCountFor('top', 10, H);
+  const lastTop = laneTopFor('top', n - 1, n, H);
+  assert.ok(lastTop + 72 <= H * 0.4, '轨道全部落在顶部区域内');
+  // middle：轨道块垂直居中（块顶 (H-块高)/2，块底 (H+块高)/2）
+  const m = laneCountFor('middle', 10, H);
+  const firstMid = laneTopFor('middle', 0, m, H);
+  const lastMid = laneTopFor('middle', m - 1, m, H);
+  assert.equal(firstMid, Math.round((H - m * 78) / 2), '块顶居中');
+  assert.ok(Math.abs((firstMid + lastMid + 72) / 2 - H / 2) <= 10, '轨道块垂直居中');
+  assert.ok(lastMid + 72 <= H * 0.7, '不超出中带');
 });

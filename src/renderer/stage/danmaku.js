@@ -7,10 +7,13 @@ function buildLanes() {
   lanesEl.innerHTML = '';
   config.lanes = [];
   const viewportH = window.innerHeight;
-  for (let i = 0; i < config.maxConcurrent; i++) {
+  // 轨道数按位置区域收敛（top/middle 只占视口上部 40%）：maxConcurrent 大时不会铺满全屏，
+  // 超出容量的弹幕由 freeLane 随机复用轨道
+  const laneCount = ds.laneCountFor(config.position, config.maxConcurrent, viewportH);
+  for (let i = 0; i < laneCount; i++) {
     const lane = document.createElement('div');
     lane.className = 'lane';
-    lane.style.top = ds.laneTopFor(config.position, i, config.maxConcurrent, viewportH) + 'px';
+    lane.style.top = ds.laneTopFor(config.position, i, laneCount, viewportH) + 'px';
     lanesEl.appendChild(lane);
     config.lanes.push({ el: lane, busy: false });
   }

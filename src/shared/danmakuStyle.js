@@ -36,6 +36,19 @@ function durationFor(anim, speed = 1) {
 // 弹幕轨道垂直位置：top=顶部 / middle=垂直居中 / full=全屏均匀分布（未知值回退顶部）
 const LANE_TOP = 6;  // 顶部起始偏移
 const LANE_H = 78;   // 轨道间距
+const TOP_REGION_RATIO = 0.4; // 顶部/中间位置占视口高的比例（B 站风格：弹幕集中在屏幕上方区域）
+
+// 位置区域的轨道数上限：轨道间距固定，区域高度决定能放几条不重叠的轨道。
+// maxConcurrent 超过区域容量时按区域收敛（多余弹幕由 freeLane 随机复用轨道），
+// 否则"顶部"配置在 maxConcurrent 大时会把轨道铺满整个屏幕
+function laneCountFor(position, maxConcurrent, viewportH) {
+  const n = Math.max(1, maxConcurrent || 6);
+  const h = viewportH || 600;
+  const regionH = h * (position === 'full' ? 1 : TOP_REGION_RATIO);
+  const maxFit = Math.max(1, Math.floor((regionH - LANE_TOP) / LANE_H));
+  return Math.min(n, maxFit);
+}
+
 function laneTopFor(position, index, maxConcurrent, viewportH) {
   const n = Math.max(1, maxConcurrent || 6);
   const h = viewportH || 600;
@@ -49,4 +62,4 @@ function laneTopFor(position, index, maxConcurrent, viewportH) {
   return LANE_TOP + index * LANE_H; // top（默认）
 }
 
-module.exports = { BASE_DURATIONS, DEFAULT_COLOR, pickFontSize, pickColor, pickAnimation, durationFor, laneTopFor, LANE_TOP, LANE_H };
+module.exports = { BASE_DURATIONS, DEFAULT_COLOR, pickFontSize, pickColor, pickAnimation, durationFor, laneTopFor, laneCountFor, LANE_TOP, LANE_H };
