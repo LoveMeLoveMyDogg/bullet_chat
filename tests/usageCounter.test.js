@@ -83,3 +83,35 @@ test('7 天保留：过期文件自动清理', () => {
   assert.ok(files.includes('usage-2026-08-07.jsonl'), '当日文件存在');
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('aggregate 分通道与合计（含失败与产出）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-usage-'));
+  const uc = new UsageCounter({ dir, clock: () => Date.parse('2026-08-07T10:00:00Z'), fsMod: fs });
+  uc.record({ channel: 'text', inputChars: 100, systemChars: 200, outputChars: 300, parsedCount: 5 });
+  uc.record({ channel: 'text', inputChars: 100, systemChars: 100, error: new Error('401') });
+  uc.record({ channel: 'vision', inputChars: 0, systemChars: 50, imageKb: 58, outputChars: 100, parsedCount: 3 });
+  const t = uc.getToday();
+  assert.equal(t.text.calls, 2);
+  assert.equal(t.text.failed, 1);
+  assert.equal(t.text.danmaku, 5);
+  assert.equal(t.vision.calls, 1);
+  assert.equal(t.vision.inputTokens, Math.ceil(50 / 1.5) + Math.ceil(58 * 12));
+  assert.equal(t.total.calls, 3);
+  assert.equal(t.total.failed, 1);
+  assert.equal(t.total.danmaku, 8);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('getHistory 返回近 7 天（含空天）', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-usage-'));
+  let fakeNow = Date.parse('2026-08-07T10:00:00Z');
+  const uc = new UsageCounter({ dir, clock: () => fakeNow, fsMod: fs });
+  uc.record({ channel: 'text', inputChars: 10, systemChars: 10 });
+  const h = uc.getHistory(7);
+  assert.equal(h.length, 7);
+  assert.equal(h[0].date, '2026-08-01');
+  assert.equal(h[6].date, '2026-08-07');
+  assert.equal(h[6].calls, 1);
+  assert.equal(h[0].calls, 0, '空天为 0');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
