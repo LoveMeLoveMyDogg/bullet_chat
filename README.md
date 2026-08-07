@@ -15,7 +15,7 @@ npm start
 
 ## 打包
 
-Windows 上打 exe（NSIS 安装包）：
+打 Windows x64 安装包（NSIS）：
 ```bash
 npm run build:win
 ```
@@ -23,7 +23,7 @@ macOS 上打 dmg：
 ```bash
 npm run build:mac
 ```
-产物在 `dist/` 目录。平台限制：exe 只能在 Windows 构建，dmg 只能在 macOS 构建。
+产物在 `dist/` 目录。平台说明：**exe 可以在 macOS 或 Windows 上构建**（electron-builder NSIS 跨平台，无需 wine；macOS 上默认打 arm64，`build:win` 已固定 `--x64`）；dmg 只能在 macOS 构建。
 
 自用分发（未签名）说明：
 - Windows：首次运行安装包会提示「未知发布者」，点「更多信息 → 仍要运行」

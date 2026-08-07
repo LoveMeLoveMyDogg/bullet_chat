@@ -7,7 +7,7 @@
   "scripts": {
     "start": "electron .",
     "test": "node --test",
-    "build:win": "electron-builder --win",
+    "build:win": "electron-builder --win --x64",
     "build:mac": "electron-builder --mac"
   },
   "devDependencies": {
@@ -18,18 +18,28 @@
     "appId": "com.bulletchat.app",
     "productName": "BulletChat",
     "icon": "assets/icon.png",
-    "files": ["src/**/*", "assets/**/*"],
+    "files": [
+      "src/**/*",
+      "assets/**/*"
+    ],
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "nsis": {
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "installerLanguages": ["zh_CN", "en_US"],
+      "installerLanguages": [
+        "zh_CN",
+        "en_US"
+      ],
       "shortcutName": "BulletChat"
     },
     "mac": {
-      "target": ["dmg"],
+      "target": [
+        "dmg"
+      ],
       "identity": null,
       "category": "public.app-category.utilities"
     }
