@@ -50,3 +50,36 @@ test('UsageCounter 未知通道按文字通道处理', () => {
   assert.equal(uc.getToday().text.calls, 1);
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('跨天切换：新一天从当日文件恢复计数', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-usage-'));
+  let fakeNow = Date.parse('2026-08-07T23:00:00Z');
+  const uc = new UsageCounter({ dir, clock: () => fakeNow, fsMod: fs });
+  uc.record({ channel: 'text', inputChars: 10, systemChars: 10, parsedCount: 3 });
+  assert.equal(uc.getToday().text.calls, 1);
+  // 跨天：记录一条 8/8，内存应只剩 8/8 的（7 日记录已落盘）
+  fakeNow = Date.parse('2026-08-08T01:00:00Z');
+  uc.record({ channel: 'vision', inputChars: 10, systemChars: 10, imageKb: 58 });
+  assert.equal(uc.getToday().text.calls, 0, '8/8 内存不含 7/7 记录');
+  assert.equal(uc.getToday().vision.calls, 1);
+  // 新实例从落盘文件恢复 8/8
+  const uc2 = new UsageCounter({ dir, clock: () => fakeNow, fsMod: fs });
+  uc2.record({ channel: 'text', inputChars: 1, systemChars: 1 });
+  assert.equal(uc2.getToday().vision.calls, 1, '重启后从当日文件恢复');
+  assert.equal(uc2.getToday().text.calls, 1);
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+test('7 天保留：过期文件自动清理', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-usage-'));
+  // 伪造 10 天前的文件
+  fs.writeFileSync(path.join(dir, 'usage-2026-07-28.jsonl'), '{}\n');
+  fs.writeFileSync(path.join(dir, 'usage-2026-08-06.jsonl'), '{}\n');
+  const uc = new UsageCounter({ dir, clock: () => Date.parse('2026-08-07T10:00:00Z'), fsMod: fs });
+  uc.record({ channel: 'text', inputChars: 1, systemChars: 1 });
+  const files = fs.readdirSync(dir).filter((f) => f.startsWith('usage-'));
+  assert.ok(!files.includes('usage-2026-07-28.jsonl'), '10 天前文件被清理');
+  assert.ok(files.includes('usage-2026-08-06.jsonl'), '1 天前文件保留');
+  assert.ok(files.includes('usage-2026-08-07.jsonl'), '当日文件存在');
+  fs.rmSync(dir, { recursive: true, force: true });
+});
