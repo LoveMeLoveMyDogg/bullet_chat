@@ -1,5 +1,32 @@
 const $ = (id) => document.getElementById(id);
 
+// 每行 "key: value" → { key: value }（去空白）
+function parseMap(text) {
+  const out = {};
+  for (const line of String(text).split('\n')) {
+    const i = line.indexOf(':');
+    if (i <= 0) continue;
+    const k = line.slice(0, i).trim().toLowerCase();
+    const v = line.slice(i + 1).trim();
+    if (k && v) out[k] = v;
+  }
+  return out;
+}
+
+// 每行 "群名: 角色1｜角色2｜场景描述" → { 群名: { roles, scene, styles: [] } }
+function parseGroups(text) {
+  const out = {};
+  for (const line of String(text).split('\n')) {
+    const i = line.indexOf(':');
+    if (i <= 0) continue;
+    const name = line.slice(0, i).trim();
+    const parts = line.slice(i + 1).split('｜').map((s) => s.trim()).filter(Boolean);
+    if (!name || parts.length === 0) continue;
+    out[name] = { roles: parts.slice(0, -1), scene: parts[parts.length - 1], styles: [] };
+  }
+  return out;
+}
+
 let config = null;
 let maskState = { displayId: null, masks: [], dragging: null, preview: null };
 
@@ -37,6 +64,14 @@ async function load() {
   }
   $('sys-autostart').checked = config.system.autostart;
   maskState.masks = config.monitor.masks || [];
+  // 前台应用监控 / 观众群 / 噪音规则
+  $('mon-app-watch').checked = config.monitor.appWatch;
+  $('mon-stay').value = config.monitor.stayMinutes;
+  $('mon-idle').value = config.monitor.idleMinutes;
+  $('mon-app-groups').value = Object.entries(config.monitor.appGroups || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+  $('mon-audience-groups').value = Object.entries(config.monitor.audienceGroups || {}).map(([k, v]) => `${k}: ${[v.roles.join('｜'), v.scene].filter(Boolean).join('｜')}`).join('\n');
+  $('mon-app-aliases').value = Object.entries(config.monitor.appAliases || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
+  $('mon-noise-rules').value = (config.monitor.noiseRules || []).join('\n');
 
   const displays = await window.settings.getDisplays();
   const sel = $('mask-display');
@@ -198,6 +233,16 @@ $('btn-save').onclick = async () => {
   config.danmaku.speed = Number($('dm-speed').value) || 1;
   config.danmaku.animations = Array.from($('dm-anims').querySelectorAll('input[type=checkbox]:checked')).map((cb) => cb.value);
   config.system.autostart = $('sys-autostart').checked;
+  // 前台应用监控 / 观众群 / 噪音规则（0 = 关闭对应播报，故仅非数字回退默认值，见各 tooltip）
+  config.monitor.appWatch = $('mon-app-watch').checked;
+  const stay = Number($('mon-stay').value);
+  config.monitor.stayMinutes = Number.isNaN(stay) ? 20 : Math.max(0, stay);
+  const idle = Number($('mon-idle').value);
+  config.monitor.idleMinutes = Number.isNaN(idle) ? 10 : Math.max(0, idle);
+  config.monitor.appGroups = parseMap($('mon-app-groups').value);
+  config.monitor.appAliases = parseMap($('mon-app-aliases').value);
+  config.monitor.audienceGroups = parseGroups($('mon-audience-groups').value);
+  config.monitor.noiseRules = $('mon-noise-rules').value.split('\n').map((s) => s.trim()).filter(Boolean);
   config.monitor.masks = maskState.masks;
   await window.settings.saveConfig(config);
   $('save-result').textContent = '已保存 ✓';
