@@ -561,25 +561,37 @@ test('停留/空闲事件进文字队列并带时间戳', async () => {
 });
 
 test('调用统计：成功与失败都记录，探测不计数', async () => {
+  // 等待异步生成完成：轮询条件而非固定延时（防全量跑时负载导致的 flake）
+  async function waitForCalls(uc, n, timeoutMs = 2000) {
+    const t0 = Date.now();
+    while (uc.getToday().text.calls < n) {
+      if (Date.now() - t0 > timeoutMs) {
+        throw new Error(`等待调用计数 ${n} 超时（当前 ${uc.getToday().text.calls}）`);
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+  }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-usage-'));
   const uc = new UsageCounter({ dir, clock: () => 0, fsMod: fs });
-  const { brain, generator } = makeEnv({ usageCounter: uc });
+  // rng 固定为 0.99：首次补充吐出全部 5 条，缓冲清空 → 第二次 pushEntry 必触发补充（
+  // 默认 Math.random 时吐 2 条留 3 条（>REFILL_THRESHOLD=2）的概率 25%，第二次调用永不发生）
+  const { brain, generator } = makeEnv({ usageCounter: uc, rng: () => 0.99 });
   brain.config.danmaku.minIntervalSec = 3600;
   brain.config.danmaku.batchIntervalMs = 0;
   // 成功
   brain.pushEntry(entry('create'));
-  await new Promise((r) => setTimeout(r, 20));
+  await waitForCalls(uc, 1);
   const afterSuccess = uc.getToday().text.calls;
   assert.equal(afterSuccess, 1);
   // 失败
   generator.chatCompletion = async () => { throw new Error('挂了'); };
   brain.pushEntry(entry('create'));
-  await new Promise((r) => setTimeout(r, 20));
+  await waitForCalls(uc, 2);
   assert.equal(uc.getToday().text.calls, 2, '失败也计数');
   assert.equal(uc.getToday().text.failed, 1);
-  // 探测请求不计数
+  // 探测请求不计数（缺失的增量无法被等待，负断言保留短固定延时）
   brain.retryNow();
-  await new Promise((r) => setTimeout(r, 20));
+  await new Promise((r) => setTimeout(r, 50));
   assert.equal(uc.getToday().text.calls, 2, 'retryNow 探测不计数');
   brain.stop();
   fs.rmSync(dir, { recursive: true, force: true });
