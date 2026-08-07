@@ -145,3 +145,13 @@ test('S1-5 未传 onCorrupt 时不抛异常（向后兼容）', () => {
   });
   fs.rmSync(dir, { recursive: true, force: true });
 });
+
+test('monitor 新增默认值（前台监控/停留/空闲/别名/观众群）', () => {
+  const m = defaultConfig().monitor;
+  assert.equal(m.appWatch, true);
+  assert.equal(m.stayMinutes, 20);
+  assert.equal(m.idleMinutes, 10);
+  assert.deepEqual(m.appAliases, {});
+  assert.deepEqual(m.appGroups, {});
+  assert.deepEqual(m.audienceGroups, {});
+});
