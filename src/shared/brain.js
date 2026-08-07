@@ -155,7 +155,9 @@ class Brain {
       const enter = this.maybeEnterGroup(entry);
       if (enter) this.queue.push(enter);
       this.queue.push(entry);
-      this.maybeRefill();
+      // app/空闲事件实时优先：绕过缓冲阈值（见 maybeRefill force 注释）
+      const isAppEvent = entry.type === 'app_switch' || entry.type === 'app_enter' || entry.type === 'app_stay' || entry.type === 'idle';
+      this.maybeRefill(isAppEvent ? { force: true } : {});
     }
   }
 
@@ -168,10 +170,12 @@ class Brain {
   }
 
   // 文字弹幕补充：缓冲剩余 ≤ REFILL_THRESHOLD 且内容池有新事件时才调 AI。
+  // force：app/空闲事件实时优先——绕过缓冲阈值立即补充，
+  // 否则文件事件频繁时缓冲常充足，app 事件在队列饿死、超时间窗被丢弃（切换应用不播报）
   // 补充节流：距上次补充不足 batchIntervalMs 时安排延迟检查，让事件风暴攒批后再调用
-  maybeRefill() {
+  maybeRefill({ force = false } = {}) {
     if (this.state.paused || this.refilling || this.state.error.text) return;
-    if (this.buffer.length > REFILL_THRESHOLD) return;
+    if (!force && this.buffer.length > REFILL_THRESHOLD) return;
     const now = this.clock();
     if (this.lastRefillAt && now - this.lastRefillAt < this.config.danmaku.batchIntervalMs) {
       if (!this.refillTimer) {

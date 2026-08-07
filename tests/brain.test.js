@@ -496,20 +496,41 @@ test('S1-3 stop 后状态广播为 idle（托盘/设置页即时感知）', () =
   assert.equal(statuses[statuses.length - 1].mode, 'idle');
 });
 
+test('app 事件实时优先：缓冲充足时也触发补充（不被时间窗饿死）', async () => {
+  const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  brain.buffer.push('占位1', '占位2', '占位3'); // 缓冲充足（> REFILL_THRESHOLD=2）
+  generator.chatCompletion = async () => { generator.textCalls++; return '["1"]'; };
+  // 文件事件：缓冲充足 → 不补充
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 0, '文件事件缓冲充足不补充');
+  // app 事件：必须绕过缓冲阈值立即补充（否则在队列饿死、超时间窗被丢弃）
+  brain.pushEntry({ source: 'app', type: 'app_switch', name: 'VSCode', appKey: 'code', drive: '', isDir: false });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 1, 'app 事件缓冲充足仍触发补充');
+  brain.stop();
+});
+
 const { resolveGroup } = require('../src/shared/audienceGroups');
 
-test('观众群：app_switch 命中不同群补发 app_enter 登场弹幕', () => {
-  const { brain } = makeEnv();
+test('观众群：app_switch 命中不同群补发 app_enter 登场弹幕', async () => {
+  const { brain, generator } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600;
-  brain.buffer.push('占位1', '占位2', '占位3'); // 缓冲充足：不触发补充，观察队列
+  brain.config.danmaku.batchIntervalMs = 0;
+  let lastUser = '';
+  generator.chatCompletion = async ({ user }) => { lastUser = user; return '["1"]'; };
   brain.pushEntry({ source: 'app', type: 'app_switch', name: 'VSCode', appKey: 'code', drive: '', isDir: false });
+  await new Promise((r) => setTimeout(r, 20));
   assert.equal(brain.currentGroup, '程序员天团');
-  assert.deepEqual(brain.queue.map((e) => e.type), ['app_enter', 'app_switch'], '登场 + 切换先后入队');
-  assert.equal(brain.queue[0].name, '程序员天团');
+  assert.ok(lastUser.includes('「程序员天团」进入直播间'), '登场弹幕入批');
+  assert.ok(lastUser.includes('用户打开了「VSCode」'), '切换弹幕入批');
   // 同群再切换：不补发登场
-  brain.queue.length = 0;
+  generator.chatCompletion = async ({ user }) => { lastUser = user; return '["1"]'; };
   brain.pushEntry({ source: 'app', type: 'app_switch', name: 'IDEA', appKey: 'idea64', drive: '', isDir: false });
-  assert.equal(brain.queue.length, 1, '同群切换只入 app_switch');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(!lastUser.includes('进入直播间'), '同群切换不补发登场');
   brain.stop();
 });
 
@@ -549,14 +570,19 @@ test('本地模式：app_switch 登场走模板兜底', async () => {
   brain.stop();
 });
 
-test('停留/空闲事件进文字队列并带时间戳', async () => {
-  const { brain } = makeEnv();
+test('停留/空闲事件进文字通道并触发补充', async () => {
+  const { brain, generator } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600;
-  brain.buffer.push('占位1', '占位2', '占位3'); // 缓冲充足：不触发补充，观察队列
+  brain.config.danmaku.batchIntervalMs = 0;
+  let lastUser = '';
+  generator.chatCompletion = async ({ user }) => { lastUser = user; return '["1"]'; };
   brain.pushEntry({ source: 'app', type: 'app_stay', name: 'VSCode', appKey: 'code', minutes: 20, drive: '', isDir: false });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(lastUser.includes('用户已在「VSCode」停留 20 分钟'), '停留事件描述入批');
+  generator.chatCompletion = async ({ user }) => { lastUser = user; return '["1"]'; };
   brain.pushEntry({ source: 'file', type: 'idle', name: '', drive: '' });
-  assert.equal(brain.queue.length, 2);
-  assert.ok(brain.queue[0].ts > 0, '带到达时间戳（时间窗过滤用）');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(lastUser.includes('屏幕已多分钟没有变化'), '空闲事件描述入批');
   brain.stop();
 });
 
