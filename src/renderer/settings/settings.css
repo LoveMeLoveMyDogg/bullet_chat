@@ -28,5 +28,15 @@ footer { margin-top: 18px; padding-top: 10px; border-top: 1px solid #444; }
 .req-shot { max-width: 200px; max-height: 120px; border: 1px solid #555; border-radius: 3px; margin-top: 4px; display: block; }
 textarea { width: 460px; margin: 4px 0; background: #2a2a3e; color: #eee; border: 1px solid #555; padding: 6px; font-family: inherit; font-size: 12px; border-radius: 3px; resize: vertical; display: block; }
 .hint-mark { display: inline-flex; width: 14px; height: 14px; border-radius: 50%; background: #555; color: #fff; font-size: 11px; line-height: 14px; align-items: center; justify-content: center; cursor: help; margin-left: 5px; position: relative; user-select: none; }
+.usage-card { font-size: 13px; padding: 8px 10px; background: #16161f; border: 1px solid #444; border-radius: 4px; margin: 6px 0; line-height: 1.7; }
+.usage-channels { font-size: 12px; margin: 6px 0; }
+.usage-channels table { border-collapse: collapse; }
+.usage-channels th, .usage-channels td { border: 1px solid #444; padding: 3px 10px; text-align: center; }
+.usage-channels th { background: #2a2a3e; }
+.usage-chart { display: flex; align-items: flex-end; gap: 6px; height: 100px; padding: 6px 0; border-bottom: 1px solid #555; }
+.usage-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 2px; }
+.usage-bar { width: 100%; max-width: 36px; background: #4a6cf7; border-radius: 2px 2px 0 0; min-height: 2px; }
+.usage-bar-tokens { background: #ffd93d; }
+.usage-bar-label { font-size: 10px; color: #999; }
 .hint-mark:hover { background: #4a6cf7; }
 .hint-mark:hover::after { content: attr(data-tip); position: absolute; left: 20px; top: -6px; width: 260px; padding: 6px 8px; background: #16161f; border: 1px solid #555; border-radius: 4px; font-size: 12px; line-height: 1.5; color: #ddd; white-space: normal; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }

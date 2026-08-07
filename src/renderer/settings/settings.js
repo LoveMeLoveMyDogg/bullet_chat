@@ -296,6 +296,63 @@ async function renderRequestLogs() {
   }
 }
 
+// 调用统计：今日汇总 + 分通道 + 近 7 天柱状（估算 token 黄色叠加）
+async function renderUsageStats() {
+  const { today, history } = await window.settings.getUsageStats();
+  const sum = $('usage-summary');
+  const t = today.total;
+  sum.innerHTML = '';
+  const card = document.createElement('div');
+  card.className = 'usage-card';
+  card.innerHTML =
+    `今日：调用 <b>${t.calls}</b> 次 · 输入 ≈${t.inputTokens} token · 输出 ≈${t.outputTokens} token` +
+    ` · 产出 <b>${t.danmaku}</b> 条弹幕 · 失败 <b>${t.failed}</b> 次` +
+    (t.calls ? `（每次调用平均产出 ${(t.danmaku / t.calls).toFixed(1)} 条）` : '');
+  sum.appendChild(card);
+
+  const ch = $('usage-channels');
+  ch.innerHTML = '';
+  const table = document.createElement('table');
+  table.innerHTML = `<tr><th>通道</th><th>次数</th><th>输入 token</th><th>输出 token</th><th>产出条数</th><th>失败</th></tr>`;
+  for (const [key, label] of [['text', '文字'], ['vision', '视觉']]) {
+    const c = today[key];
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${label}</td><td>${c.calls}</td><td>≈${c.inputTokens}</td><td>≈${c.outputTokens}</td><td>${c.danmaku}</td><td>${c.failed}</td>`;
+    table.appendChild(tr);
+  }
+  ch.appendChild(table);
+
+  const chart = $('usage-chart');
+  chart.innerHTML = '';
+  const max = Math.max(1, ...history.map((d) => d.calls));
+  const maxT = Math.max(1, ...history.map((d) => d.tokens));
+  for (const d of history) {
+    const wrap = document.createElement('div');
+    wrap.className = 'usage-bar-wrap';
+    const hCalls = Math.max(2, Math.round((d.calls / max) * 80));
+    const hTokens = Math.max(2, Math.round((d.tokens / maxT) * 80));
+    const col = document.createElement('div');
+    col.style.height = hCalls + 'px';
+    col.className = 'usage-bar';
+    col.title = `${d.date}：${d.calls} 次`;
+    const colT = document.createElement('div');
+    colT.style.height = hTokens + 'px';
+    colT.className = 'usage-bar usage-bar-tokens';
+    colT.title = `${d.date}：≈${d.tokens} token`;
+    const bar = document.createElement('div');
+    bar.style.cssText = 'display:flex;align-items:flex-end;gap:2px;height:84px;';
+    bar.appendChild(colT);
+    bar.appendChild(col);
+    const label = document.createElement('div');
+    label.className = 'usage-bar-label';
+    label.textContent = d.date.slice(5);
+    wrap.appendChild(bar);
+    wrap.appendChild(label);
+    chart.appendChild(wrap);
+  }
+}
+
+$('btn-refresh-usage').onclick = renderUsageStats;
 $('btn-refresh-log').onclick = renderRequestLogs;
 $('btn-open-log').onclick = () => window.settings.openLogDir();
-load().then(renderRequestLogs);
+load().then(async () => { await renderRequestLogs(); renderUsageStats(); });

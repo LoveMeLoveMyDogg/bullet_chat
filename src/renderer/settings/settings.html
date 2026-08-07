@@ -92,6 +92,15 @@
   </section>
 
   <section>
+    <h2>调用统计 <span class="hint-mark" data-tip="统计发送给 AI 的请求（含失败）。token 为估算值：按字符数/1.5 粗估（中英混合），视觉按截图大小另加；实际计费以你的 API 服务商为准。本统计不设上限、不拦截请求">？</span></h2>
+    <button id="btn-refresh-usage">刷新</button>
+    <div id="usage-summary"></div>
+    <div id="usage-channels"></div>
+    <h3>近 7 天调用次数</h3>
+    <div id="usage-chart" class="usage-chart"></div>
+  </section>
+
+  <section>
     <h2>日志（发送给 AI 的请求）</h2>
     <p class="hint">显示最近发送给文字/视觉模型的请求与回复；视觉请求附截图（已应用隐私遮罩）。也可直接打开日志目录查看完整文件。</p>
     <button id="btn-open-log">打开日志目录</button>
