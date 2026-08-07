@@ -27,7 +27,9 @@ function platformNoiseRules() {
 }
 
 function makeNoiseFilter(extraRules = []) {
-  const rules = DEFAULT_NOISE_SUBSTRINGS.concat(platformNoiseRules(), extraRules);
+  // 规则与路径统一转反斜杠匹配：用户按直觉填正斜杠路径（/Users/...）也能命中
+  const rules = DEFAULT_NOISE_SUBSTRINGS.concat(platformNoiseRules(), extraRules)
+    .map((r) => r.replace(/\//g, '\\'));
   return function isNoise(entry) {
     const p = (entry.path || '').replace(/\//g, '\\');
     const n = entry.name || '';

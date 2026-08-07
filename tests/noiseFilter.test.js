@@ -50,3 +50,10 @@ test('formatEventDescription 应用/空闲事件描述', () => {
   const idle = { source: 'file', type: 'idle', name: '', drive: '' };
   assert.equal(formatEventDescription(idle), '屏幕已多分钟没有变化');
 });
+
+test('噪音规则支持正斜杠路径（匹配时统一转反斜杠）', () => {
+  const f = makeNoiseFilter(['/Users/szp/.zsh_sessions', '.zcode']);
+  assert.equal(f({ path: '/Users/szp/.zsh_sessions/history', name: 'x' }), true, '正斜杠路径规则命中');
+  assert.equal(f({ path: '/Users/szp/.zcode/sessions/a.jsonl', name: 'x' }), true, '.zcode 命中');
+  assert.equal(f({ path: '/Users/szp/Documents/a.txt', name: 'x' }), false, '无关路径不命中');
+});
