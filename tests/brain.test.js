@@ -370,7 +370,7 @@ test('批量吐出：批大小不超过同屏上限与缓冲余量', async () =>
   brain.config.danmaku.burstMin = 2;
   brain.config.danmaku.burstMax = 8;
   brain.config.danmaku.maxConcurrent = 3; // 同屏上限 3
-  brain.buffer.push('a', 'b'); // 缓冲只有 2 条
+  brain.buffer.push({ text: 'a', ts: Date.now() }, { text: 'b', ts: Date.now() }); // 缓冲只有 2 条
   brain.scheduleEmit();
   await new Promise((r) => setTimeout(r, 20));
   assert.equal(danmaku.length, 2, '缓冲余量 2 条，全出');
@@ -520,7 +520,7 @@ test('事件临过期（≥60s）时缓冲充足也强制补充（防时间窗�
   brain.config.danmaku.minIntervalSec = 3600;
   brain.config.danmaku.batchIntervalMs = 0;
   brain.config.danmaku.maxEventAgeSec = 120;
-  brain.buffer.push('占位1', '占位2', '占位3'); // 缓冲充足（> REFILL_THRESHOLD=2）
+  brain.buffer.push({ text: '占位1', ts: Date.now() }, { text: '占位2', ts: Date.now() }, { text: '占位3', ts: Date.now() }); // 缓冲充足（> REFILL_THRESHOLD=2）
   brain.lastEmitAt = Date.now(); // 阻止首条立即吐出（lastEmitAt 为空时首次 emit delay=0，会以 setTimeout 链迅速抽干缓冲，破坏"缓冲充足"前提；Windows 定时器粒度 ~15ms 恰好撑过断言，macOS ~1ms 就挂）
   // 直接构造队列：70 秒前入队的事件（pushEntry 会覆盖 ts，绕过它模拟积压）
   brain.queue.push(entry('create', { ts: Date.now() - 70000 }));
@@ -539,7 +539,7 @@ test('队列限深：超 300 条丢最旧（防系统噪音无限堆积）', asy
   const { brain } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600;
   brain.config.danmaku.batchIntervalMs = 10000; // 节流：限深期间不触发补充
-  brain.buffer.push('占位1', '占位2', '占位3');  // 缓冲充足，补充不触发
+  brain.buffer.push({ text: '占位1', ts: Date.now() }, { text: '占位2', ts: Date.now() }, { text: '占位3', ts: Date.now() });  // 缓冲充足，补充不触发
   for (let i = 0; i < 350; i++) brain.pushEntry(entry('create', { path: `C:\\noise${i}.txt` }));
   assert.equal(brain.queue.length, 300, '队列保持 300 上限');
   assert.ok(!brain.queue.some((e) => e.path === 'C:\\noise0.txt'), '最旧事件被丢');
@@ -590,7 +590,7 @@ test('app 事件实时优先：缓冲充足时也触发补充（不被时间窗�
   const { brain, generator } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600;
   brain.config.danmaku.batchIntervalMs = 0;
-  brain.buffer.push('占位1', '占位2', '占位3'); // 缓冲充足（> REFILL_THRESHOLD=2）
+  brain.buffer.push({ text: '占位1', ts: Date.now() }, { text: '占位2', ts: Date.now() }, { text: '占位3', ts: Date.now() }); // 缓冲充足（> REFILL_THRESHOLD=2）
   generator.chatCompletion = async () => { generator.textCalls++; return '["1"]'; };
   // 文件事件：缓冲充足 → 不补充
   brain.pushEntry(entry('create'));
@@ -753,8 +753,9 @@ test('缓冲上限：超限丢最旧保留最新（防视觉高频积压）', ()
   assert.equal(brain.buffer.length, 15);
   brain.pushBuffer(['新1', '新2']);
   assert.equal(brain.buffer.length, 15, '超限截断');
-  assert.ok(!brain.buffer.includes('弹幕0') && !brain.buffer.includes('弹幕1'), '最旧被丢');
-  assert.ok(brain.buffer.includes('新2'), '最新保留');
+  assert.ok(brain.buffer.some((b) => b.text === '弹幕0'), '插队模式：最早入队的旧弹幕在队尾仍保留');
+  assert.ok(!brain.buffer.some((b) => b.text === '弹幕13') && !brain.buffer.some((b) => b.text === '弹幕14'), '最旧（队尾）被丢');
+  assert.ok(brain.buffer.some((b) => b.text === '新2'), '最新保留');
   // 小 burstMax 时下限 10 兜底
   brain.config.danmaku.burstMax = 1;
   assert.equal(brain.bufferLimit(), 10, '上限不低于 10');
@@ -778,5 +779,34 @@ test('缓冲上限：文字与视觉生成都走 pushBuffer', async () => {
   brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
   await new Promise((r) => setTimeout(r, 20));
   assert.deepEqual(calls[1], ['视觉1'], '视觉生成走 pushBuffer');
+  brain.stop();
+});
+
+test('最新优先：有旧积压时新回复插队首先飘出（批内顺序保持）', async () => {
+  const { brain, danmaku } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1; // 逐条吐，便于断言
+  brain.buffer.push({ text: '旧1', ts: Date.now() }, { text: '旧2', ts: Date.now() });
+  brain.pushBuffer(['新1', '新2']);
+  assert.equal(brain.buffer[0].text, '新1', '新回复插队首');
+  assert.equal(brain.buffer[2].text, '旧1', '旧弹幕退到队尾');
+  brain.scheduleEmit(); // emit 走 setTimeout（delay=0 也异步），需等待定时器触发
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(danmaku[0].text, '新1', '最新回复先飘出');
+  assert.equal(brain.buffer[0].text, '新2', '批内顺序保持（未反转）');
+  brain.stop();
+});
+
+test('最新优先：新回复到达时丢弃入队超过 30s 的旧弹幕', () => {
+  let fakeNow = 1000000;
+  const { brain } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600;
+  // 新模型队首=最新：10s 内的在队首，40s 的在队尾（队尾=最旧）
+  brain.buffer.push({ text: '旧2', ts: fakeNow - 10000 }, { text: '旧1', ts: fakeNow - 40000 });
+  brain.pushBuffer(['新1']);
+  assert.equal(brain.buffer.length, 2, '入队 40s 的旧弹幕被丢，10s 内的保留');
+  assert.equal(brain.buffer[0].text, '新1');
+  assert.equal(brain.buffer[1].text, '旧2');
   brain.stop();
 });

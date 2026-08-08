@@ -17,6 +17,7 @@ const MAX_READ_BYTES = 50 * 1024;   // 超过此大小不读内容（大文件/�
 const MAX_CONTENT_CHARS = 200;      // 内容片段最长字符数
 const BINARY_PROBE = 4096;          // 二进制检测采样长度
 const FILE_APP_TYPES = ['create', 'change', 'delete', 'rename', 'move']; // 文件操作类型：打前台应用戳
+const STALE_BUFFER_MS = 30000; // 弹幕缓冲年龄上限：新回复到达时丢弃入队超过 30s 的旧弹幕（积压旧闻不占屏幕）
 
 // 读取文本文件内容片段（供 AI 生成"懂内容"的弹幕）。
 // 只读小文本文件：超限/二进制/读取失败一律返回空串（保持事件描述不因内容读取而失败）
@@ -77,7 +78,7 @@ class Brain {
     this.currentGroup = null;  // 当前观众群（登场播报去重用）
     this.queue = [];          // 文字事件内容池（最近事件，供补充调用使用）
     this.visionQueue = [];    // 视觉事件（变化驱动 + 限速）
-    this.buffer = [];         // 文字弹幕缓冲池：AI 一次回复多条，按节奏逐条吐出
+    this.buffer = [];         // 弹幕缓冲池：{ text, ts } 元素，最新优先（新回复插队首），按节奏逐条吐出
     this.refilling = false;   // 补充调用进行中标记（防并发补充）
     this.lastRefillAt = 0;    // 上次补充时间（补充节流）
     this.lastEmitAt = 0;      // 上次吐出弹幕时间（首次补充后立即吐出）
@@ -256,15 +257,21 @@ class Brain {
   // 弹幕吐出：按 minIntervalSec 节奏一批批飘（每批 burstMin~burstMax 条随机，像直播间弹幕雨）。
   // 批大小受同屏上限（maxConcurrent）与缓冲余量约束；补充后第一批立即出（不等满间隔）
   // 弹幕缓冲上限：防生成速率 > 消耗速率时积压（视觉通道高频场景每 10s +10 条 vs 消耗 2~3 条）。
+  // 最新优先：新回复整批插队首（保持批内顺序），队尾方向即最旧；
   // 超限丢最旧保留最新（直播语义：弹幕是即时的，积压的旧弹幕没意义，最新弹幕才有价值）
   bufferLimit() {
     return Math.max(10, (this.config.danmaku.burstMax || 8) * 5);
   }
 
   pushBuffer(lines) {
-    this.buffer.push(...lines);
+    const now = this.clock();
+    // 最新优先：新回复整批插队首（保持批内顺序），视觉/文字通道统一
+    this.buffer.unshift(...lines.map((text) => ({ text, ts: now })));
+    // 年龄清理：入队超过 STALE_BUFFER_MS 的旧弹幕直接丢（队尾方向最旧，逐条 pop）
+    while (this.buffer.length && now - this.buffer[this.buffer.length - 1].ts > STALE_BUFFER_MS) this.buffer.pop();
+    // 上限兜底：仍超限则从队尾截断（丢最旧）
     const limit = this.bufferLimit();
-    if (this.buffer.length > limit) this.buffer.splice(0, this.buffer.length - limit);
+    if (this.buffer.length > limit) this.buffer.splice(limit);
   }
 
   scheduleEmit() {
@@ -286,9 +293,9 @@ class Brain {
       const n = min + Math.floor(this.rng() * (max - min + 1));
       this.lastEmitAt = this.clock();
       for (let i = 0; i < n; i++) {
-        const text = this.buffer.shift();
-        if (text === undefined) break;
-        this.onDanmaku(text, { source: 'ai' });
+        const item = this.buffer.shift();
+        if (item === undefined) break;
+        this.onDanmaku(item.text, { source: 'ai' });
       }
       if (this.buffer.length) this.scheduleEmit();
       else this.maybeRefill();
