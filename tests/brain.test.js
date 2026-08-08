@@ -939,3 +939,34 @@ test('emit 侧年龄清理：全部超龄时清空缓冲不吐出，转补充检
   assert.equal(generator.textCalls, 1, '缓冲清空后转补充检查，AI 被调用');
   brain.stop();
 });
+
+test('批标记：同批弹幕共享 burst id，不同批递增', async () => {
+  const { brain, danmaku } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.burstMin = 2;
+  brain.config.danmaku.burstMax = 2; // 一批 2 条
+  brain.pushBuffer(['一', '二']);
+  brain.scheduleEmit();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(danmaku.length, 2, '一批 2 条全出');
+  assert.equal(danmaku[0].meta.burst, danmaku[1].meta.burst, '同批共享批标记');
+  assert.ok(danmaku[0].meta.burst >= 1, '有递增批标记');
+  brain.stop();
+});
+
+test('视觉源头降产：maxCount = min(replyCount, 3)', async () => {
+  const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  let got = null;
+  generator.visionCompletion = async (args) => { got = args; return '["v1"]'; };
+  brain.config.danmaku.replyCount = 10;
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST' });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(got.maxCount, 3, 'replyCount=10 时视觉降产到 3');
+  brain.config.danmaku.replyCount = 2;
+  brain.pushEntry({ source: 'screen', type: 'screen', name: '屏幕变化2', path: '', drive: '', imageDataUrl: 'data:image/jpeg;base64,TEST2' });
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(got.maxCount, 2, 'replyCount < 3 时用 replyCount');
+  brain.stop();
+});

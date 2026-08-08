@@ -19,6 +19,8 @@ const BINARY_PROBE = 4096;          // 二进制检测采样长度
 const FILE_APP_TYPES = ['create', 'change', 'delete', 'rename', 'move']; // 文件操作类型：打前台应用戳
 const STALE_BUFFER_MS = 30000; // 弹幕缓冲年龄上限：新回复到达时丢弃入队超过 30s 的旧弹幕（积压旧闻不占屏幕）
 const PRIORITY_GAP_MS = 3000;  // 优先发批最短间隔：距上次飘出 ≥3s 时新回复立即发一批（防连发刷屏）
+const VISION_MAX_COUNT = 3; // 视觉弹幕单次回复条数上限：源头降产（视觉 ~0.3/s < 舞台容量 ~0.625/s），
+                            // 防渲染层排队超载；输出 token 减少也直接省钱
 
 // 读取文本文件内容片段（供 AI 生成"懂内容"的弹幕）。
 // 只读小文本文件：超限/二进制/读取失败一律返回空串（保持事件描述不因内容读取而失败）
@@ -85,6 +87,7 @@ class Brain {
     this.lastEmitAt = 0;      // 上次吐出弹幕时间（首次补充后立即吐出）
     this.refillTimer = null;  // 延迟补充检查定时器
     this.emitTimer = null;    // 弹幕吐出定时器
+    this.burstId = 0;        // 弹幕批标记：每次 burst 递增，渲染层批间最新优先、批内保序
     this.changeSeen = new Map(); // path -> lastChangeTime
     this.lastTextEmit = 0;   // 本地模式弹幕最后发送时间
     this.lastVisionEmit = 0; // 视觉弹幕最后发送时间（独立限速，避免视觉高频烧额度）
@@ -307,10 +310,11 @@ class Brain {
       const min = Math.min(this.config.danmaku.burstMin || 2, max);
       const n = min + Math.floor(this.rng() * (max - min + 1));
       this.lastEmitAt = now;
+      this.burstId += 1; // 批标记：同批共享 id，渲染层按批插队且批内保序
       for (let i = 0; i < n; i++) {
         const item = this.buffer.shift();
         if (item === undefined) break;
-        this.onDanmaku(item.text, { source: 'ai' });
+        this.onDanmaku(item.text, { source: 'ai', burst: this.burstId });
       }
       if (this.buffer.length) this.scheduleEmit();
       else this.maybeRefill();
@@ -360,13 +364,14 @@ class Brain {
     this.lastVisionImage = entry.imageDataUrl;
     const system = buildSystemPrompt(currentStyles(this));
     try {
+      const maxCount = Math.min(this.config.danmaku.replyCount || 10, VISION_MAX_COUNT);
       const raw = await this.generator.visionCompletion({
         baseUrl: this.config.visionModel.baseUrl,
         apiKey: this.config.visionModel.apiKey,
         model: this.config.visionModel.model,
         system,
         imageDataUrl: entry.imageDataUrl,
-        maxCount: this.config.danmaku.replyCount || 10,
+        maxCount,
       });
       this.logger?.logRequest({ channel: 'vision', input: '屏幕画面变化截图', reply: raw, imageDataUrl: entry.imageDataUrl });
       const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
