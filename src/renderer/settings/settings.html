@@ -93,6 +93,20 @@
   </section>
 
   <section>
+    <h2>更新 <span class="hint-mark" data-tip="启动时自动检查一次，也可手动检查。发现新版本后下载完整安装包（下载目录），校验通过后自动打开，手动安装覆盖旧版">？</span></h2>
+    <div class="label-row">当前版本 v<span id="update-current"></span>
+      <button id="btn-update-check">检查更新</button>
+    </div>
+    <div id="update-status"></div>
+    <div id="update-actions" hidden>
+      <button id="btn-update-download">去下载</button>
+      <button id="btn-update-ignore">忽略此版本</button>
+      <button id="btn-update-cancel">取消</button>
+    </div>
+    <div id="update-progress-wrap" class="update-progress-wrap" hidden><div id="update-progress-bar"></div></div>
+  </section>
+
+  <section>
     <h2>调用统计 <span class="hint-mark" data-tip="统计发送给 AI 的请求（含失败）。token 为估算值：按字符数/1.5 粗估（中英混合），视觉按截图大小另加；实际计费以你的 API 服务商为准。本统计不设上限、不拦截请求">？</span></h2>
     <button id="btn-refresh-usage">刷新</button>
     <div id="usage-summary"></div>

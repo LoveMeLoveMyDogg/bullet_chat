@@ -41,3 +41,5 @@ textarea { width: 460px; margin: 4px 0; background: #2a2a3e; color: #eee; border
 .usage-bar-label { font-size: 10px; color: #999; }
 .hint-mark:hover { background: #4a6cf7; }
 .hint-mark:hover::after { content: attr(data-tip); position: absolute; left: 20px; top: -6px; width: 260px; padding: 6px 8px; background: #16161f; border: 1px solid #555; border-radius: 4px; font-size: 12px; line-height: 1.5; color: #ddd; white-space: normal; z-index: 10; box-shadow: 0 2px 8px rgba(0,0,0,0.5); }
+.update-progress-wrap { height: 8px; background: #2a2a3e; border-radius: 4px; margin: 8px 0; overflow: hidden; }
+#update-progress-bar { height: 100%; width: 0; background: #4caf50; transition: width .2s; }

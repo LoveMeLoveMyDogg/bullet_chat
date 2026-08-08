@@ -364,4 +364,73 @@ async function renderUsageStats() {
 $('btn-refresh-usage').onclick = renderUsageStats;
 $('btn-refresh-log').onclick = renderRequestLogs;
 $('btn-open-log').onclick = () => window.settings.openLogDir();
-load().then(async () => { await renderRequestLogs(); renderUsageStats(); });
+
+// 更新区块：状态来自主进程（检查/下载都在主进程执行，渲染进程只展示与发指令）
+async function renderUpdate() {
+  const s = await window.updater.getState();
+  $('update-current').textContent = s.currentVersion;
+  const status = $('update-status');
+  const actions = $('update-actions');
+  const wrap = $('update-progress-wrap');
+  $('btn-update-download').hidden = true;
+  $('btn-update-ignore').hidden = true;
+  $('btn-update-cancel').hidden = true;
+  actions.hidden = s.state !== 'available' && s.state !== 'downloading';
+  wrap.hidden = true;
+  switch (s.state) {
+    case 'available':
+      status.textContent = `发现新版本 v${s.latestVersion}${s.notes ? '：' + s.notes.split('\n')[0] : ''}`;
+      status.className = 'result ok';
+      $('btn-update-download').hidden = false;
+      $('btn-update-ignore').hidden = false;
+      break;
+    case 'downloading':
+      status.textContent = `正在下载 v${s.latestVersion}… ${s.progress ? s.progress.percent + '%' : ''}`;
+      status.className = 'result ok';
+      wrap.hidden = false;
+      $('update-progress-bar').style.width = (s.progress ? s.progress.percent : 0) + '%';
+      $('btn-update-cancel').hidden = false;
+      break;
+    case 'done':
+      status.textContent = `已下载 v${s.latestVersion}，正在打开安装包`;
+      status.className = 'result ok';
+      break;
+    case 'ignored':
+      status.textContent = `已忽略 v${s.latestVersion}，更高版本将重新提醒`;
+      status.className = 'result ok';
+      break;
+    case 'error':
+      status.textContent = `更新失败：${s.message || '网络错误'}`;
+      status.className = 'result err';
+      break;
+    case 'checking':
+      status.textContent = '正在检查…';
+      status.className = 'result ok';
+      break;
+    case 'no-installer':
+      status.textContent = '此平台暂无安装包';
+      status.className = 'result ok';
+      break;
+    default: // idle / up-to-date
+      status.textContent = '已是最新版本';
+      status.className = 'result ok';
+  }
+}
+
+$('btn-update-check').onclick = async () => {
+  $('btn-update-check').disabled = true;
+  await window.updater.check();
+  $('btn-update-check').disabled = false;
+  renderUpdate();
+};
+
+$('btn-update-download').onclick = async () => { await window.updater.download(); renderUpdate(); };
+$('btn-update-cancel').onclick = async () => { await window.updater.cancel(); renderUpdate(); };
+$('btn-update-ignore').onclick = async () => {
+  const s = await window.updater.getState();
+  if (s.latestVersion) await window.updater.ignoreVersion(s.latestVersion);
+  renderUpdate();
+};
+
+window.updater.onProgress(() => renderUpdate());
+load().then(async () => { await renderRequestLogs(); renderUsageStats(); renderUpdate(); });
