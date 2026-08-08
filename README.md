@@ -25,6 +25,14 @@ npm run build:mac
 ```
 产物在 `dist/` 目录。平台说明：**exe 可以在 macOS 或 Windows 上构建**（electron-builder NSIS 跨平台，无需 wine；macOS 上默认打 arm64，`build:win` 已固定 `--x64`）；dmg 只能在 macOS 构建。
 
+构建工具链下载说明：electron-builder 需要从 GitHub 下载 NSIS 等工具，若网络不通（如国内直连超时）设置镜像：
+```bash
+# Linux/macOS
+ELECTRON_BUILDER_BINARIES_MIRROR=https://npmmirror.com/mirrors/electron-builder-binaries/ npm run build:win
+# Windows PowerShell
+$env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-builder-binaries/"; npm run build:win
+```
+
 自用分发（未签名）说明：
 - Windows：首次运行安装包会提示「未知发布者」，点「更多信息 → 仍要运行」
 - macOS：首次打开需右键应用 →「打开」；屏幕识别需重新授权（系统设置 → 隐私与安全性 → 屏幕录制，权限按应用独立）
