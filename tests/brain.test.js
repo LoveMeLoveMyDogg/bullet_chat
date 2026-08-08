@@ -819,13 +819,13 @@ test('优先发批：距上次飘出 ≥3s 时打断现有定时器立即发', a
   brain.config.danmaku.burstMax = 1;
   brain.buffer.push({ text: '旧1', ts: fakeNow }, { text: '旧2', ts: fakeNow });
   brain.scheduleEmit(); // 非优先：起 3600s 定时器（旧1 立即吐出）
-  await new Promise((r) => setTimeout(r, 5));
+  await new Promise((r) => setTimeout(r, 20));
   assert.equal(danmaku.length, 1, '旧1 已出');
   assert.ok(brain.emitTimer, '旧2 的节奏定时器在跑');
   fakeNow += 5000; // 5 秒后：距上次飘出 ≥3s
   brain.pushBuffer(['新1']);
   brain.scheduleEmit(true); // 优先：应打断 3600s 定时器立即发
-  await new Promise((r) => setTimeout(r, 5));
+  await new Promise((r) => setTimeout(r, 20));
   assert.equal(danmaku.length, 2, '新1 立即飘出（不等 3600s 节奏）');
   assert.equal(danmaku[1].text, '新1', '最新回复先出');
   brain.stop();
@@ -839,7 +839,7 @@ test('优先发批：距上次飘出 <3s 时保留现有定时器（防连发刷
   brain.config.danmaku.burstMax = 1;
   brain.buffer.push({ text: '旧1', ts: fakeNow }, { text: '旧2', ts: fakeNow });
   brain.scheduleEmit();
-  await new Promise((r) => setTimeout(r, 5));
+  await new Promise((r) => setTimeout(r, 20));
   assert.equal(danmaku.length, 1);
   const timer = brain.emitTimer;
   assert.ok(timer, '节奏定时器在跑');
@@ -847,5 +847,64 @@ test('优先发批：距上次飘出 <3s 时保留现有定时器（防连发刷
   brain.pushBuffer(['新1']);
   brain.scheduleEmit(true);
   assert.equal(brain.emitTimer, timer, '现有定时器保留（不打断）');
+  brain.stop();
+});
+
+test('最新优先：年龄清理严格边界——恰好 30s 保留，30001ms 丢弃', () => {
+  let fakeNow = 1000000;
+  const { brain } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600; // 不触发补充噪声
+  // 入队恰好 30000ms：不超龄，新回复到达时保留（> 30s 才丢，= 30s 不丢）
+  brain.buffer.push({ text: '正好30s', ts: fakeNow - 30000 });
+  brain.pushBuffer(['新1']);
+  assert.equal(brain.buffer.length, 2, '恰好 30s 的旧弹幕保留');
+  assert.equal(brain.buffer[1].text, '正好30s', '旧弹幕在队尾（最旧侧）');
+  // 入队 30001ms：超龄 1ms，新回复到达时丢弃
+  brain.buffer.push({ text: '超1ms', ts: fakeNow - 30001 });
+  brain.pushBuffer(['新2']);
+  assert.equal(brain.buffer.length, 3, '30001ms 的旧弹幕被丢，其余保留');
+  assert.ok(!brain.buffer.some((b) => b.text === '超1ms'), '超龄 1ms 的旧弹幕被丢弃');
+  assert.ok(brain.buffer.some((b) => b.text === '新2'), '新回复保留');
+  brain.stop();
+});
+
+test('优先发批：暂停时不调度（保留残留定时器），恢复后重新调度', async () => {
+  let fakeNow = 1000000;
+  const { brain, danmaku } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1;
+  // 建立残留节奏定时器：旧1 已飘出，旧2 的 3600s 定时器在跑
+  brain.buffer.push({ text: '旧1', ts: fakeNow }, { text: '旧2', ts: fakeNow });
+  brain.scheduleEmit();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(danmaku.length, 1, '旧1 已出');
+  const residual = brain.emitTimer;
+  assert.ok(residual, '旧2 的节奏定时器在跑');
+  // 暂停后 priority 发批：不清残留定时器、不新调度（pause 时不调度）
+  brain.pause();
+  fakeNow += 1000; // 距上次飘出 1s < 3s：priority 保留现有定时器（防连发）
+  brain.pushBuffer(['新1']);
+  brain.scheduleEmit(true);
+  assert.equal(brain.emitTimer, residual, '暂停时保留残留定时器');
+  assert.equal(danmaku.length, 1, '暂停期间不飘出');
+  // 恢复：buffer 有货，resume 重新 scheduleEmit（emitTimer 非空，缓冲继续吐）
+  brain.resume();
+  assert.ok(brain.emitTimer, 'resume 后恢复调度');
+  brain.stop();
+});
+
+test('优先发批：无定时器且距上次飘出 <3s 时补足间隔（不立即发）', async () => {
+  let fakeNow = 1000000;
+  const { brain, danmaku } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1;
+  brain.buffer.push({ text: '新1', ts: fakeNow });
+  brain.lastEmitAt = fakeNow; // 无定时器，但刚飘完一批（距上次 <3s）
+  brain.scheduleEmit(true);
+  assert.ok(brain.emitTimer, '补足 3s 间隔的定时器已排程');
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(danmaku.length, 0, '3s 间隔未到，不提前飘出');
   brain.stop();
 });

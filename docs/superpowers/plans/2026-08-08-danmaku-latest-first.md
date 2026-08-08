@@ -154,7 +154,7 @@ const STALE_BUFFER_MS = 30000; // 弹幕缓冲年龄上限：新回复到达时�
 - [ ] **Step 5: 运行全量测试确认通过**
 
 Run: `npm test 2>&1 | tail -20`
-Expected: 全部 PASS（153 现有适配后 + 2 新 = 155，无 FAIL）。
+Expected: 全部 PASS（176 现有适配后 + 2 新 = 178，无 FAIL）。
 
 - [ ] **Step 6: 提交**
 
@@ -295,7 +295,7 @@ const PRIORITY_GAP_MS = 3000;  // 优先发批最短间隔：距上次飘出 ≥
 - [ ] **Step 5: 运行全量测试确认通过**
 
 Run: `npm test 2>&1 | tail -20`
-Expected: 全部 PASS（155 + 2 新 = 157，无 FAIL）。重点确认 `批量吐出` / `事件风暴` / `补充闸门` 主题用例不回归（priority 路径 delay 计算在这些场景下仍为 0 或与原行为等价）。
+Expected: 全部 PASS（178 + 2 新 = 180，无 FAIL）。重点确认 `批量吐出` / `事件风暴` / `补充闸门` 主题用例不回归（priority 路径 delay 计算在这些场景下仍为 0 或与原行为等价）。
 
 - [ ] **Step 6: 提交**
 
@@ -317,7 +317,7 @@ git commit -m "feat: 新回复优先发批（scheduleEmit priority，打断节�
 - [ ] **Step 1: 全量测试 + 计数核对**
 
 Run: `npm test 2>&1 | tail -30`
-Expected: 全部 PASS；末尾统计显示 `tests 157`（153 旧 + 2 新（Task 1）+ 2 新（Task 2））。
+Expected: 全部 PASS；末尾统计显示 `tests 180`（176 旧 + 4 新）。
 
 - [ ] **Step 2: git 状态核对**
 
