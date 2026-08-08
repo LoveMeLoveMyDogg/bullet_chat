@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>BulletChat 桌面弹幕直播 · 下载</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💬</text></svg>" />
+<meta name="description" content="BulletChat 桌面弹幕直播：像直播观众一样盯着你的电脑，文件操作、屏幕变化都会飘出 AI 生成的弹幕吐槽。支持 Windows 与 macOS。" />
+<style>
+  :root {
+    --bg1: #0b1026;
+    --bg2: #1a1038;
+    --bg3: #0a1f3c;
+    --glass: rgba(255, 255, 255, 0.06);
+    --glass-border: rgba(255, 255, 255, 0.14);
+    --text: #eef0ff;
+    --text-dim: rgba(238, 240, 255, 0.72);
+    --accent: #7c6cff;
+    --accent2: #4fc3f7;
+    --accent3: #ff6ec7;
+    --radius: 18px;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+    color: var(--text);
+    background: linear-gradient(150deg, var(--bg1) 0%, var(--bg2) 45%, var(--bg3) 100%);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+  /* 背景光晕装饰 */
+  .glow {
+    position: fixed; inset: 0; pointer-events: none; z-index: 0;
+    background:
+      radial-gradient(600px 400px at 15% 10%, rgba(124, 108, 255, 0.22), transparent 70%),
+      radial-gradient(700px 500px at 85% 25%, rgba(79, 195, 247, 0.16), transparent 70%),
+      radial-gradient(500px 400px at 60% 90%, rgba(255, 110, 199, 0.12), transparent 70%);
+  }
+
+  /* ===== 弹幕背景 ===== */
+  .danmaku-layer { position: fixed; inset: 0; overflow: hidden; z-index: 1; pointer-events: none; }
+  .danmaku {
+    position: absolute; white-space: nowrap; font-weight: 600;
+    color: rgba(255, 255, 255, 0.5); text-shadow: 0 0 12px rgba(124, 108, 255, 0.35);
+    animation: fly linear forwards;
+    will-change: transform;
+  }
+  @keyframes fly {
+    from { transform: translateX(100vw); }
+    to   { transform: translateX(-100%); }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .danmaku { display: none; }
+  }
+
+  /* ===== 内容层 ===== */
+  .page { position: relative; z-index: 2; max-width: 860px; margin: 0 auto; padding: 48px 20px 32px; }
+
+  /* Hero */
+  .hero {
+    background: var(--glass);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius);
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    padding: 44px 36px 36px;
+    text-align: center;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.45);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::before {
+    content: ""; position: absolute; inset: -1px; border-radius: var(--radius);
+    background: linear-gradient(120deg, transparent 30%, rgba(255, 255, 255, 0.12) 50%, transparent 70%);
+    background-size: 200% 100%;
+    animation: sheen 6s linear infinite;
+    pointer-events: none;
+  }
+  @keyframes sheen { from { background-position: 200% 0; } to { background-position: -200% 0; } }
+  .logo { font-size: 44px; margin-bottom: 6px; }
+  .hero h1 {
+    font-size: 34px; letter-spacing: 1px;
+    background: linear-gradient(90deg, #fff, var(--accent2), var(--accent3));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hero .tagline { margin-top: 12px; color: var(--text-dim); font-size: 15px; line-height: 1.7; }
+
+  /* 版本徽标 */
+  .version-badge {
+    display: inline-flex; align-items: center; gap: 8px;
+    margin-top: 18px; padding: 6px 16px;
+    border: 1px solid rgba(124, 108, 255, 0.5); border-radius: 999px;
+    background: rgba(124, 108, 255, 0.15); color: #cfc8ff;
+    font-size: 14px; font-weight: 600;
+  }
+  .version-badge .pulse { width: 8px; height: 8px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; animation: pulse 1.6s ease-in-out infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+  /* 下载按钮 */
+  .downloads { display: flex; flex-wrap: wrap; justify-content: center; gap: 14px; margin-top: 26px; }
+  .dl-btn {
+    position: relative; display: inline-block; text-decoration: none;
+    padding: 13px 26px; border-radius: 12px; overflow: hidden;
+    font-size: 15px; font-weight: 700; color: #fff;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    box-shadow: 0 8px 24px rgba(124, 108, 255, 0.35);
+    transition: transform 0.15s ease, box-shadow 0.15s ease;
+  }
+  .dl-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 32px rgba(124, 108, 255, 0.55); }
+  .dl-btn::after {
+    content: ""; position: absolute; top: 0; left: -80%; width: 50%; height: 100%;
+    background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.35), transparent);
+    transform: skewX(-20deg); transition: left 0.5s ease;
+  }
+  .dl-btn:hover::after { left: 130%; }
+  .dl-btn .sub { display: block; font-size: 12px; font-weight: 500; opacity: 0.85; margin-top: 2px; }
+  .dl-btn.mac { background: linear-gradient(135deg, #5b8def, #7c6cff); box-shadow: 0 8px 24px rgba(91, 141, 239, 0.35); }
+  .dl-btn.mac:hover { box-shadow: 0 12px 32px rgba(91, 141, 239, 0.55); }
+
+  .unsig { margin-top: 16px; font-size: 12px; color: rgba(238, 240, 255, 0.5); line-height: 1.6; }
+
+  /* 特性卡片 */
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 34px; }
+  .feat {
+    background: var(--glass); border: 1px solid var(--glass-border);
+    border-radius: 14px; padding: 20px 18px;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+    transition: transform 0.15s ease, border-color 0.15s ease;
+  }
+  .feat:hover { transform: translateY(-3px); border-color: rgba(124, 108, 255, 0.5); }
+  .feat .ico { font-size: 26px; }
+  .feat h3 { margin-top: 10px; font-size: 15px; }
+  .feat p { margin-top: 6px; font-size: 13px; color: var(--text-dim); line-height: 1.6; }
+
+  /* 更新说明 */
+  .notes {
+    margin-top: 34px; background: var(--glass); border: 1px solid var(--glass-border);
+    border-radius: var(--radius); padding: 22px 26px;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  .notes h2 { font-size: 17px; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .notes ul { list-style: none; }
+  .notes li { font-size: 14px; color: var(--text-dim); line-height: 1.8; padding-left: 18px; position: relative; }
+  .notes li::before { content: "▸"; position: absolute; left: 0; color: var(--accent2); }
+
+  /* 安装指引 */
+  .guide { margin-top: 20px; }
+  details {
+    background: var(--glass); border: 1px solid var(--glass-border);
+    border-radius: 12px; margin-bottom: 12px; overflow: hidden;
+    backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+  }
+  summary {
+    cursor: pointer; padding: 14px 20px; font-size: 15px; font-weight: 600;
+    list-style: none; display: flex; align-items: center; gap: 8px;
+  }
+  summary::-webkit-details-marker { display: none; }
+  summary::after { content: "▾"; margin-left: auto; color: var(--text-dim); transition: transform 0.2s; }
+  details[open] summary::after { transform: rotate(180deg); }
+  details .body { padding: 4px 20px 16px; font-size: 14px; color: var(--text-dim); line-height: 1.9; }
+  details code {
+    background: rgba(255, 255, 255, 0.1); padding: 1px 7px; border-radius: 5px;
+    font-family: "SF Mono", Consolas, monospace; font-size: 13px; color: #bde3ff;
+  }
+
+  /* 页脚 */
+  footer { margin-top: 40px; text-align: center; font-size: 12px; color: rgba(238, 240, 255, 0.4); }
+
+  /* 加载中/暂无状态 */
+  .muted { color: var(--text-dim); font-size: 14px; }
+
+  /* 响应式 */
+  @media (max-width: 560px) {
+    .page { padding: 24px 14px 24px; }
+    .hero { padding: 30px 20px 26px; }
+    .hero h1 { font-size: 26px; }
+    .logo { font-size: 34px; }
+    .dl-btn { width: 100%; }
+  }
+</style>
+</head>
+<body>
+
+<div class="glow"></div>
+<div class="danmaku-layer" id="danmakuLayer" aria-hidden="true"></div>
+
+<div class="page">
+  <!-- Hero -->
+  <section class="hero">
+    <div class="logo">💬</div>
+    <h1>BulletChat 桌面弹幕直播</h1>
+    <p class="tagline">
+      像直播观众一样盯着你的电脑：文件操作、屏幕变化都会飘出 AI 生成的弹幕吐槽。<br />
+      支持 Windows 与 macOS · AI 观众群 · 隐私保护
+    </p>
+    <div class="version-badge"><span class="pulse"></span><span id="versionText">正在获取版本…</span></div>
+
+    <div class="downloads" id="downloads">
+      <span class="muted">加载下载信息中…</span>
+    </div>
+
+    <p class="unsig">
+      ⚠️ 自用分发（未签名）：Windows 首次运行点「更多信息 → 仍要运行」；macOS 首次需右键应用 →「打开」，屏幕识别需在系统设置中重新授权屏幕录制
+    </p>
+  </section>
+
+  <!-- 特性 -->
+  <section class="features">
+    <div class="feat"><div class="ico">📁</div><h3>文件弹幕</h3><p>新建、修改、删除文件都会触发 AI 观众吐槽，你的操作就是直播内容</p></div>
+    <div class="feat"><div class="ico">🖥️</div><h3>屏幕弹幕</h3><p>屏幕画面变化即被捕捉识别，视觉模型实时点评你在干什么</p></div>
+    <div class="feat"><div class="ico">🎭</div><h3>AI 观众群</h3><p>程序员天团、吃瓜群众、摸鱼大队…每个应用都有自己的观众席</p></div>
+    <div class="feat"><div class="ico">🔒</div><h3>隐私保护</h3><p>API Key 仅存本机；隐私遮罩涂黑敏感区域；截图只发给你配置的接口</p></div>
+  </section>
+
+  <!-- 更新说明 -->
+  <section class="notes">
+    <h2>📝 更新说明</h2>
+    <ul id="notesList"><li class="muted">暂无更新说明</li></ul>
+  </section>
+
+  <!-- 安装指引 -->
+  <section class="guide">
+    <details>
+      <summary>🪟 Windows 安装</summary>
+      <div class="body">
+        1. 点击上方「下载 Windows」按钮获取安装包<br />
+        2. 双击 <code>.exe</code>，出现「未知发布者」提示时点 <code>更多信息 → 仍要运行</code><br />
+        3. 按向导安装（可自选安装目录），完成后从托盘打开设置，填入模型接口即可
+      </div>
+    </details>
+    <details>
+      <summary>🍎 macOS 安装</summary>
+      <div class="body">
+        1. 点击上方「下载 macOS」按钮获取 <code>.dmg</code>，双击挂载<br />
+        2. 将应用拖入「应用程序」，首次打开需 <b>右键 → 打开</b>（绕过 Gatekeeper）<br />
+        3. 首次启用屏幕识别时，在 <code>系统设置 → 隐私与安全性 → 屏幕录制</code> 中授权（权限按应用独立，重装后需重新授权）
+      </div>
+    </details>
+  </section>
+
+  <footer>© 2026 zhipengcoding.com · BulletChat</footer>
+</div>
+
+<script>
+(function () {
+  'use strict';
+
+  /* ===== 弹幕背景 ===== */
+  var POOL = [
+    'AI 观众已就位', '主人在肝代码', '这波操作很秀', '新建文件夹の意义', '屏幕又变了？',
+    '摸鱼被抓包', '弹幕护体！', '文件多开警告', '保存！快保存！', '删除前先备份啊',
+    '又是熟悉的 Ctrl+C', '老板键已备好', '今天也要元气摸鱼', '这 bug 改了三小时', '优雅，太优雅了',
+    '观众席满了', '666666', '前方高能', '笑死，删了又建', '冲鸭！',
+  ];
+  var MAX_DANMAKU = 15;
+  var layer = document.getElementById('danmakuLayer');
+  var active = 0;
+
+  function spawnDanmaku() {
+    if (active >= MAX_DANMAKU) return;
+    var el = document.createElement('div');
+    el.className = 'danmaku';
+    el.textContent = POOL[Math.floor(Math.random() * POOL.length)];
+    var top = 4 + Math.random() * 78;            // 4% ~ 82% 高度
+    var dur = 11 + Math.random() * 10;           // 11 ~ 21s 飘完
+    var size = 13 + Math.random() * 10;          // 13 ~ 23px
+    var alpha = 0.28 + Math.random() * 0.22;     // 透明度低，不抢内容
+    var hue = Math.random() < 0.5 ? '255,255,255' : (Math.random() < 0.5 ? '196,181,253' : '125,211,252');
+    el.style.top = top + 'vh';
+    el.style.fontSize = size + 'px';
+    el.style.color = 'rgba(' + hue + ',' + alpha + ')';
+    el.style.animationDuration = dur + 's';
+    el.style.animationDelay = (Math.random() * 6) + 's';
+    active++;
+    el.addEventListener('animationend', function () {
+      el.remove();
+      active--;
+    });
+    layer.appendChild(el);
+  }
+
+  function startDanmaku() {
+    if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    spawnDanmaku();
+    setInterval(function () {
+      if (active < MAX_DANMAKU) spawnDanmaku();
+    }, 700 + Math.random() * 500);
+    // 首屏快速铺几条
+    for (var i = 0; i < 5; i++) setTimeout(spawnDanmaku, i * 500);
+  }
+
+  /* ===== 版本信息渲染 ===== */
+  var PLATFORMS = [
+    { key: 'win-x64',   label: '⬇ 下载 Windows x64',          sub: '安装包 exe', cls: '' },
+    { key: 'mac-arm64', label: '⬇ 下载 macOS（Apple 芯片）',  sub: '安装包 dmg', cls: 'mac' },
+    { key: 'mac-x64',   label: '⬇ 下载 macOS（Intel）',       sub: '安装包 dmg', cls: 'mac' },
+  ];
+
+  function renderVersion(m) {
+    document.getElementById('versionText').textContent = '最新版本 v' + m.version;
+    var box = document.getElementById('downloads');
+    box.innerHTML = '';
+    var has = false;
+    PLATFORMS.forEach(function (p) {
+      var entry = m.files && m.files[p.key];
+      if (!entry) return;
+      has = true;
+      var a = document.createElement('a');
+      a.className = 'dl-btn ' + p.cls;
+      a.href = entry.url;
+      a.target = '_blank';
+      a.rel = 'noopener';
+      var main = document.createElement('span');
+      main.textContent = p.label;
+      a.appendChild(main);
+      // 平台版本与顶层不一致时标注（双平台分开发布可能不同步）
+      var sub = p.sub;
+      if (entry.version && entry.version !== m.version) sub += ' · v' + entry.version;
+      var s = document.createElement('span');
+      s.className = 'sub';
+      s.textContent = sub;
+      a.appendChild(s);
+      box.appendChild(a);
+    });
+    if (!has) box.innerHTML = '<span class="muted">暂无可用安装包，敬请期待</span>';
+
+    var list = document.getElementById('notesList');
+    if (m.notes) {
+      list.innerHTML = '';
+      String(m.notes).split('\n').filter(Boolean).forEach(function (line) {
+        var li = document.createElement('li');
+        li.textContent = line;
+        list.appendChild(li);
+      });
+    }
+  }
+
+  fetch('/version.json', { cache: 'no-store' })
+    .then(function (r) {
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      return r.json();
+    })
+    .then(renderVersion)
+    .catch(function () {
+      document.getElementById('versionText').textContent = '暂无发布版本';
+      document.getElementById('downloads').innerHTML = '<span class="muted">暂无可用安装包，敬请期待</span>';
+    });
+
+  startDanmaku();
+})();
+</script>
+</body>
+</html>
