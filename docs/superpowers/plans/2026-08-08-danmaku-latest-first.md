@@ -317,7 +317,7 @@ git commit -m "feat: 新回复优先发批（scheduleEmit priority，打断节�
 - [ ] **Step 1: 全量测试 + 计数核对**
 
 Run: `npm test 2>&1 | tail -30`
-Expected: 全部 PASS；末尾统计显示 `tests 180`（176 旧 + 4 新）。
+Expected: 全部 PASS；末尾统计显示 `tests 185`（176 旧 + 9 新）。
 
 - [ ] **Step 2: git 状态核对**
 

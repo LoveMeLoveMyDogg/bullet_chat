@@ -16,7 +16,7 @@
 - 现状：`buffer` 为 `string[]`，`pushBuffer` 追加到尾部，上限超限从队首丢最旧；emit 从队首 `shift()`（FIFO，旧弹幕先飘）。
 - 方案：
   - `buffer` 元素改为 `{ text, ts }`（ts = 入队时间戳），仅 `brain.js` 内部使用（已 grep 确认 11 处引用全部在本文件，无外部依赖）。
-  - `pushBuffer(lines)`：新回复整批 `unshift` 到队首（保持批内顺序，`unshift(...lines.map(...))` 一次性展开不反转）；随后年龄清理——从队尾逐条 pop 入队超过 `STALE_BUFFER_MS`（常量 30s）的旧弹幕；仍超限则从队尾 `splice(limit)` 截断（丢最旧）。队首 = 最新，队尾 = 最旧，三条路径统一。
+  - `pushBuffer(lines)`：新回复整批 `unshift` 到队首（保持批内顺序，`unshift(...lines.map(...))` 一次性展开不反转）；随后年龄清理——从队尾逐条 pop 入队超过 `STALE_BUFFER_MS`（常量 30s）的旧弹幕；仍超限则从队尾 `splice(limit)` 截断（丢最旧）。队首 = 最新，队尾 = 最旧，三条路径统一。emit 吐出前同样先清队尾超龄弹幕（静默期——无新回复到达——旧闻也不占屏幕；清空则转补充检查）。
   - emit 取 `this.buffer.shift().text`，其余节奏逻辑（burstMin/burstMax/minIntervalSec）不变。
   - `setLocalMode` 清缓冲逻辑兼容对象结构（`length = 0` 无需改）。
 - 测试：插队顺序（有旧货时新回复先吐）；批内顺序不反转；年龄清理（>30s 丢、≤30s 留，注入 fake clock）；上限截断从队尾丢最旧（现有"缓冲上限"测试断言改为队尾语义：`弹幕13/14` 被丢、`新1/新2` 保留）。
@@ -37,6 +37,7 @@
 
 - 现有直接操作 buffer 的用例（约 8 处：`buffer.push('占位1')`、`buffer.includes('弹幕0')`、`buffer.length` 断言等）适配 `{text, ts}` 结构：push 改 `{text, ts}`（或走 `pushBuffer`），includes 改 `.some(b => b.text === ...)`。
 - "批量吐出""缓冲上限""补充闸门"三个主题语义逐条核对（上限丢最旧断言从队首改队尾）。
+- 新增用例：插队/批内顺序、年龄边界（30s 整保留、30001ms 丢）、上限队尾截断、优先发批（≥3s 打断、<3s 保留、无定时器补足、paused 交互）、emit 侧年龄清理（部分超龄/全部超龄转补充）。
 
 ## 不做
 
@@ -47,5 +48,5 @@
 
 ## 验证
 
-- `npm test` 全绿（176 现有 + 新增 4 组）。
+- `npm test` 全绿（176 现有 + 新增 9 组）。
 - 冒烟：`npm start` 实际体验——积压时操作文件/切应用，确认最新回复即时飘出、旧弹幕不挡路。

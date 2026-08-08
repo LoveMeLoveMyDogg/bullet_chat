@@ -292,8 +292,11 @@ class Brain {
     const delay = priority ? Math.max(0, PRIORITY_GAP_MS - sinceLast) : Math.max(0, this.config.danmaku.minIntervalSec * 1000 - sinceLast);
     this.emitTimer = setTimeout(() => {
       this.emitTimer = null;
+      const now = this.clock();
+      // emit 侧年龄清理：静默期（无新回复到达）超龄旧弹幕同样丢弃，积压旧闻不占屏幕
+      while (this.buffer.length && now - this.buffer[this.buffer.length - 1].ts > STALE_BUFFER_MS) this.buffer.pop();
       if (this.buffer.length === 0) {
-        this.maybeRefill(); // 缓冲空了：看内容池是否需要补充
+        this.maybeRefill(); // 缓冲空了（含清理后空）：看内容池是否需要补充
         return;
       }
       const max = Math.min(
@@ -303,7 +306,7 @@ class Brain {
       );
       const min = Math.min(this.config.danmaku.burstMin || 2, max);
       const n = min + Math.floor(this.rng() * (max - min + 1));
-      this.lastEmitAt = this.clock();
+      this.lastEmitAt = now;
       for (let i = 0; i < n; i++) {
         const item = this.buffer.shift();
         if (item === undefined) break;

@@ -908,3 +908,34 @@ test('优先发批：无定时器且距上次飘出 <3s 时补足间隔（不立
   assert.equal(danmaku.length, 0, '3s 间隔未到，不提前飘出');
   brain.stop();
 });
+
+test('emit 侧年龄清理：静默期超龄弹幕不吐出，新鲜弹幕照常', async () => {
+  let fakeNow = 1000000;
+  const { brain, danmaku } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 0;
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1;
+  // 遵守"队首=最新、队尾=最旧"不变量：新鲜在前、超龄在后
+  brain.buffer.push({ text: '新1', ts: fakeNow }, { text: '旧1', ts: fakeNow - 40000 });
+  brain.scheduleEmit(); // sinceLast=Infinity → delay 0 → 立即触发
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(danmaku.length, 1, '超龄旧1 被丢弃不吐出');
+  assert.equal(danmaku[0].text, '新1', '新鲜弹幕照常飘出');
+  brain.stop();
+});
+
+test('emit 侧年龄清理：全部超龄时清空缓冲不吐出，转补充检查', async () => {
+  let fakeNow = 1000000;
+  const { brain, danmaku, generator } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 0;
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1;
+  brain.config.danmaku.batchIntervalMs = 0;
+  brain.buffer.push({ text: '旧1', ts: fakeNow - 40000 });
+  brain.queue.push(entry('create', { ts: fakeNow })); // 内容池有待处理事件
+  brain.scheduleEmit();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.ok(!danmaku.some((d) => d.text === '旧1'), '超龄弹幕不吐出');
+  assert.equal(generator.textCalls, 1, '缓冲清空后转补充检查，AI 被调用');
+  brain.stop();
+});
