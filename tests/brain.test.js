@@ -942,15 +942,22 @@ test('emit 侧年龄清理：全部超龄时清空缓冲不吐出，转补充检
 
 test('批标记：同批弹幕共享 burst id，不同批递增', async () => {
   const { brain, danmaku } = makeEnv();
-  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.minIntervalSec = 0; // 连发两批
   brain.config.danmaku.burstMin = 2;
   brain.config.danmaku.burstMax = 2; // 一批 2 条
   brain.pushBuffer(['一', '二']);
   brain.scheduleEmit();
   await new Promise((r) => setTimeout(r, 20));
-  assert.equal(danmaku.length, 2, '一批 2 条全出');
-  assert.equal(danmaku[0].meta.burst, danmaku[1].meta.burst, '同批共享批标记');
-  assert.ok(danmaku[0].meta.burst >= 1, '有递增批标记');
+  assert.equal(danmaku.length, 2, '第一批 2 条全出');
+  const first = danmaku[0].meta.burst;
+  assert.equal(danmaku[1].meta.burst, first, '同批共享批标记');
+  assert.ok(first >= 1, '有递增批标记');
+  brain.pushBuffer(['三', '四']);
+  brain.scheduleEmit();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(danmaku.length, 4, '第二批 2 条全出');
+  assert.equal(danmaku[2].meta.burst, first + 1, '不同批递增');
+  assert.equal(danmaku[3].meta.burst, first + 1, '第二批内共享新批标记');
   brain.stop();
 });
 

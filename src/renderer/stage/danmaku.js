@@ -34,9 +34,10 @@ function pushPending(text, meta) {
   const front = pending[0];
   if (burst !== undefined && front && front.burst === burst) {
     front.lines.push({ text, meta }); // 同一批：追加保持批内顺序
-    return;
+  } else {
+    pending.unshift({ burst, lines: [{ text, meta }] }); // 新批：插队首
   }
-  pending.unshift({ burst, lines: [{ text, meta }] }); // 新批：插队首
+  // 上限：无论新批还是同批追加，超限都从队尾丢最旧批（队列保持 ≤ PENDING_LIMIT）
   let total = 0;
   for (const b of pending) total += b.lines.length;
   while (total > PENDING_LIMIT && pending.length > 1) {
