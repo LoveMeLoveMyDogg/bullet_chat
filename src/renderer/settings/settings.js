@@ -257,18 +257,31 @@ window.settings.onStatus((s) => {
   bar.textContent = `状态：${s.text}`;
 });
 
-// 请求日志：发送给文字/视觉模型的内容、回复与截图
+// 请求日志：发送给文字/视觉模型的内容、回复与截图（5s 自动刷新，无变化不重建）
+let lastLogSignature = '';   // 上次渲染的日志签名（数量+最新条目 ts），未变化跳过重建
+let seenLogKeys = new Set(); // 已渲染条目 key（ts|channel|error），只保留当前 ≤100 条
+let firstRender = true;      // 首屏不高亮（开页时全部算"新"会全闪）
+
 async function renderRequestLogs() {
   const logs = await window.settings.getRequestLogs();
+  const sig = logs.length + '|' + (logs.length ? logs[logs.length - 1].ts : '');
+  if (sig === lastLogSignature) return; // 无新请求：跳过（避免每 5s 重建 DOM）
+  lastLogSignature = sig;
+  firstRender = false; // 首次完整渲染（无论空或非空）后不再抑制高亮
   const box = $('req-log');
+  const prevScroll = box.scrollTop; // 重建前保存滚动位置（自动刷新时阅读旧日志不跳）
   box.innerHTML = '';
   if (!logs.length) {
     box.textContent = '（暂无请求记录，有 AI 请求后显示）';
     return;
   }
+  const currentKeys = new Set();
   for (const l of [...logs].reverse()) {
+    const key = `${l.ts}|${l.channel}|${l.error || ''}`;
+    currentKeys.add(key);
+    const isNew = !firstRender && !seenLogKeys.has(key);
     const row = document.createElement('div');
-    row.className = 'req-item ' + (l.error ? 'req-err' : '');
+    row.className = 'req-item ' + (l.error ? 'req-err ' : '') + (isNew ? 'req-new' : '');
     const head = document.createElement('div');
     const time = new Date(l.ts).toLocaleTimeString();
     const channel = l.channel === 'vision' ? '视觉' : '文字';
@@ -303,6 +316,8 @@ async function renderRequestLogs() {
     }
     box.appendChild(row);
   }
+  seenLogKeys = currentKeys; // 只保留当前渲染的条目（防 Set 无限增长）
+  box.scrollTop = prevScroll; // 恢复滚动位置
 }
 
 // 调用统计：今日汇总 + 分通道 + 近 7 天柱状（估算 token 黄色叠加）
@@ -434,3 +449,9 @@ $('btn-update-ignore').onclick = async () => {
 
 window.updater.onProgress(() => renderUpdate());
 load().then(async () => { await renderRequestLogs(); renderUsageStats(); renderUpdate(); });
+
+// 日志自动刷新：5s 轮询，仅窗口可见时拉取（隐藏/最小化跳过；窗口销毁即渲染进程销毁，无泄漏）
+const LOG_REFRESH_MS = 5000;
+setInterval(() => {
+  if (document.visibilityState === 'visible') renderRequestLogs();
+}, LOG_REFRESH_MS);

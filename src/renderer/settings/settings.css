@@ -21,6 +21,12 @@ footer { margin-top: 18px; padding-top: 10px; border-top: 1px solid #444; }
 .label-row label { display: inline-flex; align-items: center; margin: 0 6px 0 0; }
 .privacy-note { font-size: 12px; color: #ffd54f; background: #3a2f00; border: 1px solid #665800; border-radius: 4px; padding: 8px 10px; margin: 10px 0; line-height: 1.6; }
 .req-log { max-height: 320px; overflow-y: auto; border: 1px solid #444; border-radius: 4px; padding: 8px; background: #16161f; }
+/* 新请求高亮：自动刷新出现的新条目闪一次白雾后淡出 */
+.req-item.req-new { animation: req-flash 2s ease-out; }
+@keyframes req-flash {
+  from { background: rgba(255, 255, 255, 0.18); }
+  to { background: transparent; }
+}
 .req-item { border-bottom: 1px solid #333; padding: 6px 0; font-size: 12px; }
 .req-item:last-child { border-bottom: none; }
 .req-err { color: #ff8a80; }
