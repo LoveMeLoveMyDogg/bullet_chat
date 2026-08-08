@@ -496,6 +496,95 @@ test('S1-3 stop 后状态广播为 idle（托盘/设置页即时感知）', () =
   assert.equal(statuses[statuses.length - 1].mode, 'idle');
 });
 
+test('本地模式完全离线：文件事件不触发 AI 补充，重试探测也不发', async () => {
+  const { brain, danmaku, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  brain.setLocalMode(true);
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 0, '本地模式不调 AI');
+  assert.ok(danmaku.some((d) => d.text.startsWith('【本地】')), '本地模板弹幕直出');
+  // 错误状态下 retryNow 也不该发探测请求（省额度）
+  brain.state.error.text = { source: 'text', message: 'x', at: 0 };
+  brain.state.error.vision = { source: 'vision', message: 'y', at: 0 };
+  brain.retryNow();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 0, '本地模式重试探测不调 AI');
+  assert.equal(generator.visionCalls, 0, '本地模式视觉探测不调 AI');
+  brain.stop();
+});
+
+test('事件临过期（≥60s）时缓冲充足也强制补充（防时间窗丢弃）', async () => {
+  const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  brain.config.danmaku.maxEventAgeSec = 120;
+  brain.buffer.push('占位1', '占位2', '占位3'); // 缓冲充足（> REFILL_THRESHOLD=2）
+  // 直接构造队列：70 秒前入队的事件（pushEntry 会覆盖 ts，绕过它模拟积压）
+  brain.queue.push(entry('create', { ts: Date.now() - 70000 }));
+  brain.maybeRefill();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 1, '临过期事件无视缓冲水位强制补充');
+  // 对照组：新事件 + 缓冲充足 → 不补充
+  brain.queue.push(entry('create', { ts: Date.now() }));
+  brain.maybeRefill();
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 1, '新鲜事件缓冲充足不补充');
+  brain.stop();
+});
+
+test('队列限深：超 300 条丢最旧（防系统噪音无限堆积）', async () => {
+  const { brain } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 10000; // 节流：限深期间不触发补充
+  brain.buffer.push('占位1', '占位2', '占位3');  // 缓冲充足，补充不触发
+  for (let i = 0; i < 350; i++) brain.pushEntry(entry('create', { path: `C:\\noise${i}.txt` }));
+  assert.equal(brain.queue.length, 300, '队列保持 300 上限');
+  assert.ok(!brain.queue.some((e) => e.path === 'C:\\noise0.txt'), '最旧事件被丢');
+  assert.ok(brain.queue.some((e) => e.path === 'C:\\noise349.txt'), '最新事件保留');
+  brain.stop();
+});
+
+test('人为门控：无输入活动时文件事件不发文字模型（系统自动写入被挡）', async () => {
+  const { brain, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.batchIntervalMs = 0;
+  brain.config.monitor.humanFileOnly = true;
+  let act = { active: false };
+  brain.getHumanActivity = () => act;
+  generator.chatCompletion = async () => { generator.textCalls++; return '["1"]'; };
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 0, '无输入活动：文件事件被门控，不调 AI');
+  assert.equal(brain.queue.length, 0, '被门控事件不进队列');
+  act = { active: true }; // 用户开始操作
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 1, '有输入活动：文件事件照常发');
+  brain.stop();
+});
+
+test('人为门控：本地模式不受影响，未注入回调时放行', async () => {
+  const { brain, danmaku, generator } = makeEnv();
+  brain.config.danmaku.minIntervalSec = 0;
+  brain.config.danmaku.batchIntervalMs = 0;
+  brain.config.monitor.humanFileOnly = true;
+  // 未注入 getHumanActivity → 放行（宽松）
+  generator.chatCompletion = async () => { generator.textCalls++; return '["1"]'; };
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 1, '未注入回调不拦截');
+  // 本地模式：无输入活动也发模板弹幕（不调 API，无需门控）
+  generator.textCalls = 0;
+  brain.setLocalMode(true);
+  brain.pushEntry(entry('create'));
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(generator.textCalls, 0, '本地模式不调 AI');
+  assert.ok(danmaku.some((d) => d.text.startsWith('【本地】')), '本地模板弹幕照常发出');
+  brain.stop();
+});
+
 test('app 事件实时优先：缓冲充足时也触发补充（不被时间窗饿死）', async () => {
   const { brain, generator } = makeEnv();
   brain.config.danmaku.minIntervalSec = 3600;

@@ -57,3 +57,28 @@ test('噪音规则支持正斜杠路径（匹配时统一转反斜杠）', () =>
   assert.equal(f({ path: '/Users/szp/.zcode/sessions/a.jsonl', name: 'x' }), true, '.zcode 命中');
   assert.equal(f({ path: '/Users/szp/Documents/a.txt', name: 'x' }), false, '无关路径不命中');
 });
+
+test('win32 系统目录默认噪音（ProgramData/Program Files 全挡，用户目录不受影响）', () => {
+  if (process.platform !== 'win32') return; // 平台专属规则，仅在 Windows 断言
+  const f = makeNoiseFilter();
+  assert.equal(f(mk('delete', 'DTPDB.DB-wal', 'C:\\ProgramData\\Dell\\DTP\\DB\\DTPDB.DB-wal')), true, 'Dell 遥测库删除（用户实测噪音源）');
+  assert.equal(f(mk('create', 'x', 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe')), true, 'Program Files 全挡');
+  assert.equal(f(mk('create', 'x', 'C:\\Program Files (x86)\\Google\\GoogleUpdater\\updater.log')), true, 'Program Files (x86) 全挡');
+  assert.equal(f(mk('create', 'x', 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsPhotos_1.0\\a.dll')), true, 'Windows 商店应用目录');
+  assert.equal(f(mk('create', 'a.txt', 'C:\\Users\\szp\\Desktop\\a.txt')), false, '用户桌面不受影响');
+  assert.equal(f(mk('create', 'a.txt', 'D:\\work\\a.txt')), false, '工作区不受影响');
+});
+
+test('win32 盘根级系统噪音默认规则（实测噪音源：NVIDIA/腾讯系/Dell/微信）', () => {
+  if (process.platform !== 'win32') return; // 平台专属规则，仅在 Windows 断言
+  const f = makeNoiseFilter();
+  assert.equal(f(mk('create', 'x', 'C:\\Program Files\\WindowsApps\\Microsoft.WindowsPhotos_1.0\\a.dll')), true, 'Windows 商店应用目录（开机更新）');
+  assert.equal(f(mk('create', 'nvAppTimestamps', 'C:\\nvAppTimestamps')), true, 'NVIDIA 盘根日志');
+  assert.equal(f(mk('create', 'x', 'C:\\ProgramData\\Tencent\\QQPCMgr\\UploadCache\\~TS8CAA.tmp')), true, 'QQ 电脑管家临时文件');
+  assert.equal(f(mk('create', 'x', 'C:\\ProgramData\\Tencent\\QQPCMgr\\TAVWfsDB\\LocalCloudWhite2.ini')), true, 'QQ 电脑管家病毒库');
+  assert.equal(f(mk('create', 'log_center.db', 'C:\\log_center.db')), true, '腾讯系日志库');
+  assert.equal(f(mk('create', 'x', 'C:\\wxid_ryfm81sljdsy22\\a.txt')), true, '微信数据目录');
+  assert.equal(f(mk('create', 'x', 'C:\\Program Files\\Dell\\SupportAssistAgent\\log')), true, 'Dell SupportAssist');
+  assert.equal(f(mk('create', 'x', 'C:\\Program Files (x86)\\Google\\GoogleUpdater\\updater.log')), true, 'Google 更新器日志');
+  assert.equal(f(mk('create', 'a.txt', 'D:\\a.txt')), false, '用户文件不受影响');
+});

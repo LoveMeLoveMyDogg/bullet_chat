@@ -72,6 +72,7 @@ async function load() {
   $('mon-audience-groups').value = Object.entries(config.monitor.audienceGroups || {}).map(([k, v]) => `${k}: ${[v.roles.join('｜'), v.scene].filter(Boolean).join('｜')}`).join('\n');
   $('mon-app-aliases').value = Object.entries(config.monitor.appAliases || {}).map(([k, v]) => `${k}: ${v}`).join('\n');
   $('mon-noise-rules').value = (config.monitor.noiseRules || []).join('\n');
+  $('mon-human-file').checked = config.monitor.humanFileOnly !== false; // 旧配置缺字段默认开启
 
   const displays = await window.settings.getDisplays();
   const sel = $('mask-display');
@@ -243,6 +244,7 @@ $('btn-save').onclick = async () => {
   config.monitor.appAliases = parseMap($('mon-app-aliases').value);
   config.monitor.audienceGroups = parseGroups($('mon-audience-groups').value);
   config.monitor.noiseRules = $('mon-noise-rules').value.split('\n').map((s) => s.trim()).filter(Boolean);
+  config.monitor.humanFileOnly = $('mon-human-file').checked;
   config.monitor.masks = maskState.masks;
   await window.settings.saveConfig(config);
   $('save-result').textContent = '已保存 ✓';

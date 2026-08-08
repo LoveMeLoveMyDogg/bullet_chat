@@ -152,6 +152,7 @@ if (!gotLock) {
       logger,
       usageCounter: usage,
       getCurrentApp: () => appWatcher?.getCurrent() || null,
+      getHumanActivity: () => appWatcher?.getHumanActivity() || null, // 人为文件操作门控（开机/后台系统写入不发给文字模型）
       onDanmaku: (text, meta) => stage?.send(text, meta),
     });
 

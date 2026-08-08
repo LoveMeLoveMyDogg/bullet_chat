@@ -10,6 +10,9 @@ const BATCH_SIZE = 10;
 const COALESCE_MS = 2000;
 const RETRY_MS = 60000;
 const REFILL_THRESHOLD = 2; // 缓冲剩余 ≤2 条时触发补充（提前量覆盖一次 API 调用耗时）
+const MAX_QUEUE_AGE_MS = 60000; // 队列最旧事件接近此年龄时强制补充：视觉高频时 buffer 常满，文件事件
+                                // 等不到"缓冲不足"，靠年龄兜底在时间窗（maxEventAgeSec）内被处理
+const QUEUE_LIMIT = 300;        // 文字事件队列限深：盘根级系统噪音持续进入时防无限增长（丢最旧，最旧最接近过期）
 const MAX_READ_BYTES = 50 * 1024;   // 超过此大小不读内容（大文件/构建产物）
 const MAX_CONTENT_CHARS = 200;      // 内容片段最长字符数
 const BINARY_PROBE = 4096;          // 二进制检测采样长度
@@ -58,7 +61,7 @@ function currentStyles(brain) {
 }
 
 class Brain {
-  constructor({ config, generator, templates, reporter, logger = null, clock = Date.now, rng = Math.random, onDanmaku, onStatus, getCurrentApp = null, usageCounter = null }) {
+  constructor({ config, generator, templates, reporter, logger = null, clock = Date.now, rng = Math.random, onDanmaku, onStatus, getCurrentApp = null, getHumanActivity = null, usageCounter = null }) {
     this.config = config;
     this.generator = generator;
     this.templates = templates;
@@ -70,6 +73,7 @@ class Brain {
     this.onDanmaku = onDanmaku;
     this.onStatus = onStatus;
     this.getCurrentApp = getCurrentApp; // 前台应用上下文回调（main 装配注入），事件场景化用
+    this.getHumanActivity = getHumanActivity; // 人为活动信号回调（main 注入 AppWatcher.getHumanActivity）
     this.currentGroup = null;  // 当前观众群（登场播报去重用）
     this.queue = [];          // 文字事件内容池（最近事件，供补充调用使用）
     this.visionQueue = [];    // 视觉事件（变化驱动 + 限速）
@@ -151,10 +155,19 @@ class Brain {
       this.visionQueue.push(entry);
       this.flushVision();
     } else {
+      // 人为操作门控：开启 humanFileOnly 时，文件事件需要最近有键盘/鼠标输入——
+      // 挡掉开机/后台系统进程自动写入（驱动日志、应用更新器等），只有用户在操作时才发文字模型。
+      // 本地模式不适用（不调 API，纯模板弹幕）；getHumanActivity 未注入/未就绪时放行（宽松）
+      if (this.config.monitor.humanFileOnly && FILE_APP_TYPES.includes(entry.type)) {
+        const act = this.getHumanActivity ? this.getHumanActivity() : null;
+        if (act && !act.active) return;
+      }
       // 文字：进内容池，缓冲不足时才补充调用（弹幕能续上就不打扰 AI）
       const enter = this.maybeEnterGroup(entry);
       if (enter) this.queue.push(enter);
       this.queue.push(entry);
+      // 队列限深：盘根级系统噪音持续进入时防无限增长；丢最旧（最早进入，最接近时间窗过期）
+      if (this.queue.length > QUEUE_LIMIT) this.queue.splice(0, this.queue.length - QUEUE_LIMIT);
       // app/空闲事件实时优先：绕过缓冲阈值（见 maybeRefill force 注释）
       const isAppEvent = entry.type === 'app_switch' || entry.type === 'app_enter' || entry.type === 'app_stay' || entry.type === 'idle';
       this.maybeRefill(isAppEvent ? { force: true } : {});
@@ -174,10 +187,22 @@ class Brain {
   // 否则文件事件频繁时缓冲常充足，app 事件在队列饿死、超时间窗被丢弃（切换应用不播报）
   // 补充节流：距上次补充不足 batchIntervalMs 时安排延迟检查，让事件风暴攒批后再调用
   maybeRefill({ force = false } = {}) {
-    if (this.state.paused || this.refilling || this.state.error.text) return;
-    if (!force && this.buffer.length > REFILL_THRESHOLD) return;
+    if (this.state.paused || this.state.localMode || this.refilling || this.state.error.text) return;
     const now = this.clock();
-    if (this.lastRefillAt && now - this.lastRefillAt < this.config.danmaku.batchIntervalMs) {
+    // 时间窗过滤：只播报最近 maxEventAgeSec 秒内的改动（积压的旧事件丢弃）
+    const maxAgeMs = (this.config.danmaku.maxEventAgeSec || 0) * 1000;
+    if (maxAgeMs > 0) {
+      this.queue = this.queue.filter((e) => now - (e.ts || now) <= maxAgeMs);
+      if (this.queue.length === 0) return;
+    }
+    // 队列最旧事件年龄：接近过期（时间窗的兜底阈值）时无视缓冲水位强制补充——
+    // 视觉通道高频时 buffer 常满（>REFILL_THRESHOLD），文件事件等不到"缓冲不足"，靠年龄兜底不被时间窗丢弃
+    let oldestTs = now;
+    for (const e of this.queue) if (e.ts !== undefined && e.ts < oldestTs) oldestTs = e.ts;
+    const expiring = maxAgeMs > 0 && now - oldestTs >= Math.min(maxAgeMs, MAX_QUEUE_AGE_MS);
+    if (!force && !expiring && this.buffer.length > REFILL_THRESHOLD) return;
+    const throttled = this.lastRefillAt && now - this.lastRefillAt < this.config.danmaku.batchIntervalMs;
+    if (throttled) {
       if (!this.refillTimer) {
         const wait = this.config.danmaku.batchIntervalMs - (now - this.lastRefillAt);
         this.refillTimer = setTimeout(() => {
@@ -187,12 +212,6 @@ class Brain {
         this.refillTimer.unref?.();
       }
       return;
-    }
-    // 时间窗过滤：只播报最近 maxEventAgeSec 秒内的改动（积压的旧事件丢弃）
-    const maxAgeMs = (this.config.danmaku.maxEventAgeSec || 0) * 1000;
-    if (maxAgeMs > 0) {
-      this.queue = this.queue.filter((e) => now - (e.ts || now) <= maxAgeMs);
-      if (this.queue.length === 0) return;
     }
     const raw = this.queue.splice(0, BATCH_SIZE);
     if (raw.length === 0) return;
@@ -221,6 +240,7 @@ class Brain {
   // 视觉通道：攒批 + 独立限速（一通道被限速不影响另一通道）
   flushVision() {
     if (this.visionQueue.length === 0) return;
+    if (this.state.localMode) return; // 本地模式完全离线：不调用 AI（含重试探测）
     const now = this.clock();
     const maxAgeMs = (this.config.danmaku.maxEventAgeSec || 0) * 1000;
     if (maxAgeMs > 0) {
@@ -393,7 +413,7 @@ class Brain {
   }
 
   retryNow() {
-    if (this.state.paused) return; // 暂停弹幕时也不发重试探测（省额度）
+    if (this.state.paused || this.state.localMode) return; // 暂停弹幕/本地模式时也不发重试探测（省额度）
     for (const src of ['text', 'vision']) {
       const err = this.state.error[src];
       if (!err) continue;

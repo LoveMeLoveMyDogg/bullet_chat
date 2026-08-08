@@ -2,7 +2,8 @@ const { execFile, spawn } = require('node:child_process');
 const readline = require('node:readline');
 const { displayNameFor } = require('../shared/appNames');
 
-const POLL_MS = 2000; // 轮询间隔：变化才发事件，几乎不占 CPU
+const POLL_MS = 1000; // 轮询间隔：1 秒（人为门控依赖输入间隔缓存，轮询越密门控时序误差越小）
+const HUMAN_INPUT_MS = 10000; // 距最后键盘/鼠标输入 ≤10 秒视为"有人正在操作"（人为文件操作门控阈值）
 
 // lsappinfo front 输出：
 //   旧版：frontASN = ASN:0x0-0x1234:com.microsoft.VSCode
@@ -20,16 +21,29 @@ function parseBundleId(out) {
   return m ? m[1] : null;
 }
 
-// PowerShell 长驻脚本 stdout 行："进程名小写|窗口标题"；空行 = 无前台窗口
+// PowerShell 长驻脚本 stdout 行："A|进程名小写|窗口标题"（A=应用行，兼容旧格式"进程名|标题"）；空应用行 = 无前台窗口
 function parseWinLine(line) {
   const s = String(line || '').trim();
   if (!s) return null;
-  const i = s.indexOf('|');
+  const rest = s.startsWith('A|') ? s.slice(2) : s;
+  const i = rest.indexOf('|');
   if (i <= 0) return null;
-  return { appKey: s.slice(0, i).toLowerCase(), title: s.slice(i + 1) };
+  return { appKey: rest.slice(0, i).toLowerCase(), title: rest.slice(i + 1) };
 }
 
-// PowerShell 长驻脚本 stdout 行："进程名小写|窗口标题"；空行 = 无前台窗口
+// "I|<距最后输入毫秒>" → 数值；格式不符返回 null
+function parseInputLine(line) {
+  const s = String(line || '').trim();
+  if (!s.startsWith('I|')) return null;
+  const raw = s.slice(2).trim();
+  if (raw === '') return null; // Number('') 是 0，需显式判空
+  const v = Number(raw);
+  return Number.isFinite(v) ? v : null;
+}
+
+// PowerShell 长驻脚本 stdout 行：
+//   A|进程名小写|窗口标题（A=应用；空标题行 "A|" = 无前台窗口）
+//   I|距最后键盘/鼠标输入的毫秒数（GetLastInputInfo，人为活动信号）
 // 用 user32.GetForegroundWindow 取真实前台窗口（Get-Process 的 MainWindowHandle
 // 排序取"最后一个"不等于前台窗口：最小化的记事本句柄也可能大于 Alt-Tab 切到的 Chrome）
 const WIN_POLL_SCRIPT = `
@@ -37,14 +51,22 @@ Add-Type @"
 using System;
 using System.Runtime.InteropServices;
 using System.Text;
+public struct LastInputInfo { public uint cbSize; public uint dwTime; }
 public class WinFore {
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+  [DllImport("user32.dll")] public static extern bool GetLastInputInfo(ref LastInputInfo plii);
 }
 "@
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 while ($true) {
+  $li = New-Object LastInputInfo
+  $li.cbSize = 8  # LASTINPUTINFO = 2x uint，x86/x64 均为 8 字节；PowerShell 5.1 的 Marshal.SizeOf 嵌套类型解析有坑，硬编码
+  [WinFore]::GetLastInputInfo([ref]$li) | Out-Null
+  $idleMs = ([uint32][Environment]::TickCount) - $li.dwTime
+  if ($idleMs -gt 2147483647) { $idleMs = 0 }
+  Write-Output ('I|' + $idleMs)
   $hwnd = [WinFore]::GetForegroundWindow()
   if ($hwnd -ne [IntPtr]::Zero) {
     $procId = [uint32]0
@@ -52,17 +74,18 @@ while ($true) {
     $sb = New-Object System.Text.StringBuilder 512
     [WinFore]::GetWindowText($hwnd, $sb, 512) | Out-Null
     $p = Get-Process -Id $procId -ErrorAction SilentlyContinue
-    if ($p) { Write-Output ($p.ProcessName.ToLower() + '|' + $sb.ToString()) } else { Write-Output '' }
-  } else { Write-Output '' }
+    if ($p) { Write-Output ('A|' + $p.ProcessName.ToLower() + '|' + $sb.ToString()) } else { Write-Output 'A|' }
+  } else { Write-Output 'A|' }
   Start-Sleep -Milliseconds ${POLL_MS}
 }`;
 
 class AppWatcher {
-  constructor({ pollMs = POLL_MS, clock = Date.now, platform = process.platform, exec = execFile, onEvent, onStay, onError, stayMinutes = 20, aliases = {} }) {
+  constructor({ pollMs = POLL_MS, clock = Date.now, platform = process.platform, exec = execFile, spawnImpl = spawn, onEvent, onStay, onError, stayMinutes = 20, aliases = {} }) {
     this.pollMs = pollMs;
     this.clock = clock;
     this.platform = platform;
     this.exec = exec;
+    this.spawnImpl = spawnImpl;
     this.onEvent = onEvent;
     this.onStay = onStay;
     this.onError = onError;
@@ -71,6 +94,7 @@ class AppWatcher {
     this.current = null; // { appKey, since }
     this.timer = null;
     this.winProc = null;
+    this.lastIdleMs = null; // 距最后键盘/鼠标输入的毫秒（PowerShell 轮询缓存；null=未就绪）
   }
 
   start() {
@@ -89,6 +113,13 @@ class AppWatcher {
 
   getCurrent() {
     return this.current ? { appKey: this.current.appKey } : null;
+  }
+
+  // 人为活动信号：距最后键盘/鼠标输入是否在阈值内（人为文件操作门控用）。
+  // lastIdleMs 为 null（PowerShell 首轮输出前）→ 返回 null，调用方不拦截（宽松：避免误挡用户启动后的立即操作）
+  getHumanActivity() {
+    if (this.lastIdleMs === null) return null;
+    return { active: this.lastIdleMs <= HUMAN_INPUT_MS, idleMs: this.lastIdleMs };
   }
 
   async poll() {
@@ -135,7 +166,8 @@ class AppWatcher {
     // Windows：长驻 PowerShell 进程，stdout 逐行输出前台窗口（避免每次 spawn 的开销）
     return new Promise((resolve) => {
       if (!this.winProc) {
-        this.winProc = spawn('powershell', ['-NoProfile', '-Command', WIN_POLL_SCRIPT], { stdio: ['ignore', 'pipe', 'inherit'] });
+        // windowsHide：关键——GUI 应用无控制台，不隐藏会每次启动闪一个 PowerShell 黑窗
+        this.winProc = this.spawnImpl('powershell', ['-NoProfile', '-Command', WIN_POLL_SCRIPT], { stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true });
         this.winProc.on('error', (err) => {
           this.winProc = null; // spawn 'error' 后 Node 不一定再触发 'exit'，不置空轮询会静默死掉
           this.onError?.(new Error(`PowerShell 启动失败：${err.message}`));
@@ -143,6 +175,8 @@ class AppWatcher {
         this.winProc.on('exit', () => { this.winProc = null; });
         this.winLineBuf = null;
         readline.createInterface({ input: this.winProc.stdout }).on('line', (line) => {
+          const idle = parseInputLine(line);
+          if (idle !== null) { this.lastIdleMs = idle; return; }
           const app = parseWinLine(line);
           this.winLineBuf = app ? { appKey: app.appKey } : null;
         });
@@ -152,4 +186,4 @@ class AppWatcher {
   }
 }
 
-module.exports = { POLL_MS, parseMacFront, parseBundleId, parseWinLine, AppWatcher };
+module.exports = { POLL_MS, HUMAN_INPUT_MS, parseMacFront, parseBundleId, parseWinLine, parseInputLine, AppWatcher };

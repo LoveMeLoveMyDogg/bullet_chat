@@ -112,6 +112,7 @@ class ScreenWatcher {
 
         // 有变化：抓大图 → 应用遮罩 → 交给 Brain
         const full = await this.captureFull(src.display_id);
+        if (!full) continue; // 捕获失败（源列表竞态/虚拟显示器热切换）：跳过该源，下轮自动重试
         const masks = (this.getMasks() || []).filter((m) => String(m.displayId) === String(src.display_id));
         const dataUrl = await this.processor.process(full, masks);
         this.onEntry({
@@ -150,6 +151,7 @@ class ScreenWatcher {
       thumbnailSize: { width: FULL_W, height: Math.round(FULL_W * 9 / 16) },
     });
     const src = sources.find((s) => s.display_id === displayId) || sources[0];
+    if (!src) return null; // 源列表为空（虚拟显示器热切换的竞态窗口）：返回 null，调用方跳过本轮
     return src.thumbnail.toDataURL();
   }
 }

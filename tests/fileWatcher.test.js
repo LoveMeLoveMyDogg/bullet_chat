@@ -70,6 +70,19 @@ test('classifyEntry 跳过根目录自身元数据事件（macOS FSEvents）', (
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('classifyEntry 首次见到 change：Windows 判修改（开机 touch 已存在文件不是新建），macOS 判新建', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-cls-'));
+  const file = path.join(root, 'existing.txt');
+  fs.writeFileSync(file, 'x'); // 文件已存在（模拟开机时监听器刚启动）
+  const entry = classifyEntry(root, file, 'change', new Map()); // 首次见到 + change 事件
+  if (isWin) {
+    assert.equal(entry.type, 'change', 'Windows 首次见到 change = 已存在文件被修改，非新建（修复开机误报）');
+  } else {
+    assert.equal(entry.type, 'create', 'macOS 首次见到 change = 新建即被改的合并事件，保持新建');
+  }
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('递归监听：新建/修改/删除文件都能收到', async (t) => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-watch-'));
   const events = [];

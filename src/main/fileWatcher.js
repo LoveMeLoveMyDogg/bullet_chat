@@ -65,6 +65,12 @@ function classifyEntry(root, full, eventType, seen = new Map()) {
   if (prev !== undefined && (eventType === 'change' || prev !== mtime)) {
     return { source: 'file', type: 'change', name, path: full, drive: driveOf(root), isDir: stats.isDirectory() };
   }
+  // Windows 特例：监听刚启动（seen 无历史）时，已存在文件被系统 touch（开机初始化、
+  // 更新器扫描等）会以 change 事件先到——此时判"新建"是误报，按修改处理。
+  // macOS 不适用：FSEvents 新建即被改的合并事件以 change 先到，首次见到仍按新建。
+  if (process.platform === 'win32' && eventType === 'change') {
+    return { source: 'file', type: 'change', name, path: full, drive: driveOf(root), isDir: stats.isDirectory() };
+  }
   return { source: 'file', type: 'create', name, path: full, drive: driveOf(root), isDir: stats.isDirectory() };
 }
 

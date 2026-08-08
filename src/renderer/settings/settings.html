@@ -54,6 +54,7 @@
     <textarea id="mon-app-aliases" rows="3" placeholder="chrome: 浏览器"></textarea>
     <h3>噪音过滤规则（忽略这些路径/文件名的操作事件）<span class="hint-mark" data-tip="每行一个子串，路径或文件名包含即忽略。内置规则（AppData、node_modules、.git 等）始终生效，这里追加你的规则">？</span></h3>
     <textarea id="mon-noise-rules" rows="4" placeholder=".zcode&#10;build/"></textarea>
+    <label class="label-row"><input id="mon-human-file" type="checkbox" /> 仅人为操作才发给 AI <span class="hint-mark" data-tip="检测到键盘/鼠标输入时才把文件事件发给文字模型，挡掉开机/后台系统进程自动写入（驱动日志、应用更新等）。本地模式不受影响。无人操作时系统写入将不产生弹幕">？</span></label>
   </section>
 
   <section>
