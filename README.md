@@ -39,6 +39,19 @@ $env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-bu
 
 应用图标：默认是 `tools/generate-icon.js` 生成的占位图（`assets/icon.png`），想换图标直接替换该文件后重新构建即可。
 
+## 发布新版（检查更新）
+
+应用内「检查更新」读取 `https://updates.zhipengcoding.com/version.json`（阿里云服务器 Nginx 静态站点，复用泛域名证书）。
+
+发布步骤（各平台在自己电脑上操作）：
+
+1. 升级版本号：`npm version patch`（或手改 package.json）
+2. 构建：Windows 包 `npm run build:win`；macOS 包 `npm run build:mac`（Intel 包加 `--x64`）
+3. 首次使用先复制 `deploy.env.example` 为 `deploy.env` 并填写 SSH 参数
+4. 发布：`node tools/publish-update.js --platform win-x64 --notes "更新说明"`（mac 用 `mac-arm64`/`mac-x64`）
+
+脚本只更新当前平台条目、保留另一平台条目；自动计算 SHA256、上传安装包 + version.json 并修正属主。用户在应用内「检查更新」→ 下载完整安装包 → 手动安装覆盖旧版。
+
 ## 使用
 
 1. 托盘图标 → 打开设置
