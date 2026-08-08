@@ -24,11 +24,31 @@ function freeLane() {
   return null; // 全忙：不随机复用（同轨道复用会重叠——fly 同速同轨完全重叠），由调用方排队
 }
 
-// 同屏上限：轨道全忙时新弹幕排队，轨道释放后按到达顺序补发（防重叠）
-const pending = [];
+// 同屏上限：轨道全忙时新弹幕排队，轨道释放后补发（防重叠）。
+// 批间最新优先：新到达的批插队首（与主进程缓冲同构，最新弹幕先飘），批内顺序保持；
+// 队列上限：超限从队尾丢最旧批（防视觉高频时无限积压）
+const pending = []; // 批次队列：队首=最新批，每批 { burst, lines: [{text, meta}, ...] }
+const PENDING_LIMIT = 15;
+function pushPending(text, meta) {
+  const burst = meta && meta.burst;
+  const front = pending[0];
+  if (burst !== undefined && front && front.burst === burst) {
+    front.lines.push({ text, meta }); // 同一批：追加保持批内顺序
+    return;
+  }
+  pending.unshift({ burst, lines: [{ text, meta }] }); // 新批：插队首
+  let total = 0;
+  for (const b of pending) total += b.lines.length;
+  while (total > PENDING_LIMIT && pending.length > 1) {
+    const dropped = pending.pop(); // 队尾最旧批
+    total -= dropped.lines.length;
+  }
+}
 function dequeue() {
   if (!pending.length) return;
-  const next = pending.shift();
+  const batch = pending[0];
+  const next = batch.lines.shift();
+  if (batch.lines.length === 0) pending.shift(); // 批空了移除
   show(next.text, next.meta);
 }
 
@@ -36,7 +56,7 @@ function show(text, meta = {}) {
   if (!config.lanes) buildLanes();
   const lane = freeLane();
   if (!lane) {
-    pending.push({ text, meta });
+    pushPending(text, meta);
     return;
   }
   lane.busy = true;
