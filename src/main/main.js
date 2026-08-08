@@ -17,6 +17,7 @@ const { ImageProcessor } = require('./imageProcessor');
 const { startDemo, stopDemo } = require('./demoMode');
 const { RequestLogger } = require('./requestLogger');
 const { UsageCounter } = require('../shared/usageCounter');
+const { Updater } = require('./updater');
 
 const PRELOAD = path.join(__dirname, '..', 'preload', 'preload.js');
 
@@ -35,6 +36,7 @@ let screenWatcher = null;
 let appWatcher = null;
 let processor = null;
 let screenPaused = false; // 托盘"暂停屏幕识别"开关
+let updater = null; // 模块级：before-quit 需要 cancel；whenReady 内实例化
 
 function notify(title, body) {
   try { new Notification({ title, body }).show(); } catch { /* 忽略 */ }
@@ -105,6 +107,18 @@ function applyConfig(saved, { silent = false } = {}) {
   applyScreenWatcher();
 }
 
+// 打开设置窗口（托盘与更新通知共用；reporter 为模块级变量，whenReady 内赋值后可引用）
+function openSettings() {
+  const settingsWin = createSettingsWindow({ preloadPath: PRELOAD });
+  // 新打开/复用的设置窗口都立即收到当前状态：did-finish-load 时 renderer 监听器已就绪；
+  // 已加载完成的复用窗口则直接推送
+  const pushStatus = () => {
+    for (const win of BrowserWindow.getAllWindows()) win.webContents.send('status-changed', reporter.getStatus());
+  };
+  settingsWin?.webContents.once('did-finish-load', pushStatus);
+  if (!settingsWin?.webContents.isLoading()) pushStatus();
+}
+
 const gotLock = app.requestSingleInstanceLock();
 // Windows toast 通知需要 AppUserModelId，必须在 ready 前设置（Windows-only API）
 if (process.platform === 'win32') app.setAppUserModelId('com.bulletchat.app');
@@ -166,10 +180,22 @@ if (!gotLock) {
     stage.start();
     stage.updateConfig(config.danmaku);
 
+    updater = new Updater({
+      version: app.getVersion(),
+      getDownloadsDir: async () => {
+        try { return app.getPath('downloads'); } catch { return path.join(app.getPath('userData'), 'downloads'); }
+      },
+      openPath: (p) => shell.openPath(p),
+      getIgnoredVersion: () => config?.system?.ignoredUpdateVersion || '',
+      setIgnoredVersion: (v) => { config.system.ignoredUpdateVersion = v; saveConfig(config); },
+      onOpenSettings: openSettings,
+    });
+
     registerSettingsIpc({
       getConfig: () => config,
       saveConfig: (cfg) => { saveConfig(cfg); config = cfg; return config; },
       onConfigSaved: applyConfig,
+      updater,
     });
     ipcMain.handle('settings:testText', (_e, cfg) => testTextConnection(cfg || config.textModel));
     ipcMain.handle('settings:testVision', (_e, cfg) => testVisionConnection(cfg || config.visionModel));
@@ -185,18 +211,19 @@ if (!gotLock) {
 
     applyConfig(config, { silent: true }); // 初次装配（含自启与监控启动），不弹通知
     brain.start();
+    updater.startupCheck(); // 启动自检更新（延迟由 Updater 内部控制）
 
     // 托盘对象必须持有全局引用，否则会被 GC 回收导致图标消失
     global.__tray = createTray({
       getState: () => ({ paused, localMode: brain.getStatus().localMode, demo: !!demoHandle, screenPaused }),
       onQuit: () => app.quit(),
-      onOpenSettings: () => {
-        const settingsWin = createSettingsWindow({ preloadPath: PRELOAD });
-        // 新打开/复用的设置窗口都立即收到当前状态：did-finish-load 时 renderer 监听器已就绪；
-        // 已加载完成的复用窗口则直接推送
-        const pushStatus = () => broadcastStatus(reporter.getStatus());
-        settingsWin?.webContents.once('did-finish-load', pushStatus);
-        if (!settingsWin?.webContents.isLoading()) pushStatus();
+      onOpenSettings: openSettings,
+      onCheckUpdate: async () => {
+        const r = await updater.check({ silent: false });
+        if (r.status === 'up-to-date') notify('BulletChat', '已是最新版本');
+        else if (r.status === 'no-installer') notify('BulletChat', '此平台暂无安装包');
+        else if (r.status === 'ignored') notify('BulletChat', `已忽略 v${r.latestVersion}，更高版本将重新提醒`);
+        // error 时 check() 已弹失败通知；update-available / checking 无需额外通知
       },
       onTogglePause: () => {
         paused = !paused;
@@ -235,5 +262,6 @@ if (!gotLock) {
     appWatcher?.stop();
     watcher?.stop();
     screenWatcher?.stop();
+    updater?.cancel();
   });
 }

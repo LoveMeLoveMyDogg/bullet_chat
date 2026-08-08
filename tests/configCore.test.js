@@ -146,6 +146,21 @@ test('S1-5 未传 onCorrupt 时不抛异常（向后兼容）', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('system.ignoredUpdateVersion 默认空串且可保存往返', () => {
+  assert.equal(defaultConfig().system.ignoredUpdateVersion, '');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-cfg-'));
+  const file = path.join(dir, 'config.json');
+  try {
+    const cfg = defaultConfig();
+    cfg.system.ignoredUpdateVersion = '0.2.0';
+    saveConfigFile(file, cfg, fs, enc);
+    const loaded = loadConfigFile(file, fs, dec);
+    assert.equal(loaded.system.ignoredUpdateVersion, '0.2.0');
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('monitor 新增默认值（前台监控/停留/空闲/别名/观众群）', () => {
   const m = defaultConfig().monitor;
   assert.equal(m.appWatch, true);

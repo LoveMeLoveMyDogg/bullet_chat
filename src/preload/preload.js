@@ -28,3 +28,12 @@ contextBridge.exposeInMainWorld('processor', {
   resolveProcess: (id, dataUrl) => ipcRenderer.send('process:resolve', { id, dataUrl }),
   errorProcess: (id, message) => ipcRenderer.send('process:error', { id, message }),
 });
+
+contextBridge.exposeInMainWorld('updater', {
+  check: () => ipcRenderer.invoke('updater:check'),
+  download: () => ipcRenderer.invoke('updater:download'),
+  cancel: () => ipcRenderer.invoke('updater:cancel'),
+  ignoreVersion: (v) => ipcRenderer.invoke('updater:ignoreVersion', v),
+  getState: () => ipcRenderer.invoke('updater:getState'),
+  onProgress: (cb) => ipcRenderer.on('updater:progress', (_e, p) => cb(p)),
+});

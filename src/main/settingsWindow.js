@@ -18,10 +18,12 @@ function createSettingsWindow({ preloadPath }) {
   return win;
 }
 
-function registerSettingsIpc({ getConfig, saveConfig, onConfigSaved }) {
+function registerSettingsIpc({ getConfig, saveConfig, onConfigSaved, updater }) {
   handlers = { getConfig, saveConfig, onConfigSaved };
   ipcMain.handle('settings:getConfig', () => handlers.getConfig());
   ipcMain.handle('settings:saveConfig', (_e, cfg) => {
+    // 忽略版本由主进程单独管理，设置页快照可能过期：保存时合并回写，防止把「忽略」清掉
+    cfg.system.ignoredUpdateVersion = handlers.getConfig().system.ignoredUpdateVersion;
     const saved = handlers.saveConfig(cfg);
     handlers.onConfigSaved(saved);
     return saved;
@@ -40,6 +42,16 @@ function registerSettingsIpc({ getConfig, saveConfig, onConfigSaved }) {
     const src = sources[idx] || sources[0];
     return src ? { displayId: src.display_id, dataUrl: src.thumbnail.toDataURL() } : null;
   });
+  if (updater) {
+    ipcMain.handle('updater:check', () => updater.check({ silent: false }));
+    ipcMain.handle('updater:download', () => updater.download());
+    ipcMain.handle('updater:cancel', () => updater.cancel());
+    ipcMain.handle('updater:ignoreVersion', (_e, v) => updater.ignoreVersion(v));
+    ipcMain.handle('updater:getState', () => updater.getState());
+    updater.onProgress((p) => {
+      for (const w of BrowserWindow.getAllWindows()) w.webContents.send('updater:progress', p);
+    });
+  }
 }
 
 module.exports = { createSettingsWindow, registerSettingsIpc };
