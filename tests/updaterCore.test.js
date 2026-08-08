@@ -1,11 +1,14 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
+const http = require('node:http');
+const crypto = require('node:crypto');
+const { Writable } = require('node:stream');
 const os = require('node:os');
 const path = require('node:path');
 const {
   parseVersion, compareVersions, platformKey,
-  parseManifest, evaluateManifest, maxVersion, mergeForPublish,
+  parseManifest, evaluateManifest, maxVersion, mergeForPublish, downloadToFile,
 } = require('../src/shared/updaterCore');
 const sha = (c) => c.repeat(64);
 
@@ -121,4 +124,117 @@ test('mergeForPublish 本平台版本落后时顶层仍取最大', () => {
   const m = mergeForPublish({ remoteManifest: remote, platform: 'mac-arm64', version: '0.2.0', notes: '', url: 'm', sha256: sha('c') });
   assert.equal(m.version, '0.3.0');
   assert.equal(m.files['mac-arm64'].version, '0.2.0');
+});
+
+function startServer(handler) {
+  return new Promise((resolve) => {
+    const server = http.createServer(handler);
+    server.listen(0, '127.0.0.1', () => resolve({ server, url: `http://127.0.0.1:${server.address().port}/` }));
+  });
+}
+
+const payload = Buffer.from('fake installer content 1234567890');
+const payloadSha = crypto.createHash('sha256').update(payload).digest('hex');
+
+test('downloadToFile 下载并校验成功（.part → 重命名，进度回调）', async () => {
+  const { server, url } = await startServer((req, res) => {
+    res.writeHead(200, { 'Content-Length': payload.length });
+    res.end(payload);
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-dl-'));
+  const dest = path.join(dir, 'pkg.bin');
+  const events = [];
+  try {
+    const got = await downloadToFile({
+      url: url + 'pkg.bin', dest, sha256: payloadSha,
+      onProgress: (p) => events.push(p),
+    });
+    assert.equal(got, dest);
+    assert.ok(fs.existsSync(dest), '最终文件存在');
+    assert.ok(!fs.existsSync(dest + '.part'), '.part 已清理');
+    assert.deepEqual(fs.readFileSync(dest), payload);
+    assert.equal(events.at(-1).percent, 100);
+    assert.equal(events.at(-1).downloaded, payload.length);
+  } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('downloadToFile sha256 不符：抛错、删 .part、不留最终文件', async () => {
+  const { server, url } = await startServer((req, res) => { res.end(payload); });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-dl-'));
+  const dest = path.join(dir, 'pkg.bin');
+  try {
+    await assert.rejects(downloadToFile({ url: url + 'x', dest, sha256: '0'.repeat(64) }), /sha256/);
+    assert.ok(!fs.existsSync(dest + '.part'));
+    assert.ok(!fs.existsSync(dest));
+  } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('downloadToFile HTTP 错误：抛错并清理', async () => {
+  const { server, url } = await startServer((req, res) => { res.writeHead(500); res.end(); });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-dl-'));
+  const dest = path.join(dir, 'pkg.bin');
+  try {
+    await assert.rejects(downloadToFile({ url: url + 'x', dest, sha256: payloadSha }), /500/);
+    assert.ok(!fs.existsSync(dest + '.part'));
+  } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('downloadToFile 中止：AbortError 并清理 .part', async () => {
+  const { server, url } = await startServer((req, res) => {
+    res.writeHead(200, { 'Content-Length': 100000 });
+    res.write(Buffer.alloc(1000));
+    // 不再写，等待客户端断开
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-dl-'));
+  const dest = path.join(dir, 'pkg.bin');
+  try {
+    const ac = new AbortController();
+    const p = downloadToFile({ url: url + 'x', dest, sha256: payloadSha, signal: ac.signal });
+    setTimeout(() => ac.abort(), 100);
+    await assert.rejects(p, (err) => err.name === 'AbortError');
+    assert.ok(!fs.existsSync(dest + '.part'));
+  } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('downloadToFile 超时（AbortSignal.timeout）', async () => {
+  const { server, url } = await startServer(() => { /* 永不响应 */ });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-dl-'));
+  const dest = path.join(dir, 'pkg.bin');
+  try {
+    await assert.rejects(
+      downloadToFile({ url: url + 'x', dest, sha256: payloadSha, signal: AbortSignal.timeout(300) }),
+      (err) => err.name === 'TimeoutError' || err.name === 'AbortError'
+    );
+    assert.ok(!fs.existsSync(dest + '.part'));
+  } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('downloadToFile 重命名失败：抛错并清理 .part', async () => {
+  const { server, url } = await startServer((req, res) => { res.end(payload); });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-dl-'));
+  const dest = path.join(dir, 'existing-dir'); // 已存在目录 → renameSync 失败
+  fs.mkdirSync(dest);
+  try {
+    await assert.rejects(downloadToFile({ url: url + 'x', dest, sha256: payloadSha }), /EISDIR|ENOTEMPTY|EEXIST|Error/);
+    assert.ok(!fs.existsSync(dest + '.part'), '.part 已清理');
+  } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('downloadToFile 写盘错误：rejects 而非崩溃，不留 .part', async () => {
+  const { server, url } = await startServer((req, res) => {
+    res.writeHead(200, { 'Content-Length': payload.length });
+    res.end(payload);
+  });
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bct-dl-'));
+  const dest = path.join(dir, 'pkg.bin');
+  const failingFs = {
+    ...fs,
+    createWriteStream: () => new Writable({
+      write(_chunk, _enc, cb) { setImmediate(() => cb(new Error('disk full'))); },
+    }),
+  };
+  try {
+    await assert.rejects(downloadToFile({ url: url + 'x', dest, sha256: payloadSha, fsMod: failingFs }), /disk full/);
+    assert.ok(!fs.existsSync(dest + '.part'));
+  } finally { server.close(); fs.rmSync(dir, { recursive: true, force: true }); }
 });

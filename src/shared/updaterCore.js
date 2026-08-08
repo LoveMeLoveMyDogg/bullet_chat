@@ -1,5 +1,9 @@
 // 检查更新纯逻辑：版本解析/比较、平台映射、manifest 求值、发布合并、下载器。
 // 与 Electron 无关，node --test 直接可测；fetch/fs 可注入（下载器）。
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const { pipeline } = require('node:stream/promises');
+const { Readable, Transform } = require('node:stream');
 
 // "x.y.z" → [x,y,z]；允许 v 前缀；取前 3 段；任一段非数字 → null（非法）
 function parseVersion(v) {
@@ -90,7 +94,43 @@ function mergeForPublish({ remoteManifest, platform, version, notes, url, sha256
   return { version: maxVersion(files), notes: notes || remoteManifest?.notes || '', files };
 }
 
+// 下载 url 到 dest：先写 dest.part，SHA256 校验通过后 renameSync 为 dest。
+// fetchImpl/fsMod 可注入（默认全局 fetch / node:fs）；signal 中止时清理 .part 后 rethrow
+async function downloadToFile({ url, dest, sha256, fetchImpl = fetch, fsMod = fs, onProgress, signal }) {
+  const part = dest + '.part';
+  const res = await fetchImpl(url, { signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const total = Number(res.headers.get('content-length')) || 0;
+  const hash = crypto.createHash('sha256');
+  let downloaded = 0;
+  const counter = new Transform({
+    transform(chunk, _enc, cb) {
+      downloaded += chunk.length;
+      hash.update(chunk);
+      onProgress?.({ percent: total ? Math.min(100, Math.round((downloaded / total) * 100)) : 0, downloaded, total });
+      cb(null, chunk);
+    },
+  });
+  try {
+    await pipeline(Readable.fromWeb(res.body), counter, fsMod.createWriteStream(part));
+  } catch (err) {
+    try { fsMod.unlinkSync(part); } catch { /* 清理失败不覆盖原错误 */ }
+    throw err;
+  }
+  if (hash.digest('hex') !== String(sha256).toLowerCase()) {
+    try { fsMod.unlinkSync(part); } catch { /* 同上 */ }
+    throw new Error('sha256 校验失败');
+  }
+  try {
+    fsMod.renameSync(part, dest);
+  } catch (err) {
+    try { fsMod.unlinkSync(part); } catch { /* 清理失败不覆盖原错误 */ }
+    throw err;
+  }
+  return dest;
+}
+
 module.exports = {
   parseVersion, compareVersions, platformKey,
-  parseManifest, evaluateManifest, maxVersion, mergeForPublish,
+  parseManifest, evaluateManifest, maxVersion, mergeForPublish, downloadToFile,
 };
