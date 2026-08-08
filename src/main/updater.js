@@ -7,6 +7,9 @@ const UPDATE_URL = 'https://updates.zhipengcoding.com/version.json';
 const FETCH_TIMEOUT_MS = 10000;
 const STARTUP_CHECK_DELAY_MS = 5000;
 
+// Notification 必须保留实例，否则被 GC 后 click 事件丢失（Electron 已知行为）
+const liveNotifications = new Set();
+
 function uniquePath(p) {
   if (!fs.existsSync(p)) return p;
   const ext = path.extname(p);
@@ -39,10 +42,11 @@ class Updater {
   onProgress(cb) { this._progressCbs.push(cb); }
   _emitProgress(p) { this.progress = p; for (const cb of this._progressCbs) cb(p); }
 
-  // Notification 必须保留实例，否则被 GC 后 click 事件丢失
   showNotification(title, body, onClick) {
     try {
       const n = new Notification({ title, body });
+      liveNotifications.add(n);
+      n.on('close', () => liveNotifications.delete(n));
       if (onClick) n.on('click', onClick);
       n.show();
     } catch { /* 通知失败忽略（如无通知权限） */ }
@@ -111,7 +115,7 @@ class Updater {
         this.message = '已取消';
       } else {
         this.state = 'error';
-        this.message = /sha256/.test(err.message) ? '校验失败，请重试' : '下载失败，请重试';
+        this.message = /sha256/.test(err.message || '') ? '校验失败，请重试' : '下载失败，请重试';
       }
       return { ok: false, message: this.message };
     } finally {

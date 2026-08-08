@@ -223,7 +223,8 @@ if (!gotLock) {
         if (r.status === 'up-to-date') notify('BulletChat', '已是最新版本');
         else if (r.status === 'no-installer') notify('BulletChat', '此平台暂无安装包');
         else if (r.status === 'ignored') notify('BulletChat', `已忽略 v${r.latestVersion}，更高版本将重新提醒`);
-        // error 时 check() 已弹失败通知；update-available / checking 无需额外通知
+        else if (r.status === 'update-available') notify('BulletChat', `发现新版本 v${r.latestVersion}，可在设置页下载`);
+        // error 时 check() 已弹失败通知；checking 无需额外通知
       },
       onTogglePause: () => {
         paused = !paused;

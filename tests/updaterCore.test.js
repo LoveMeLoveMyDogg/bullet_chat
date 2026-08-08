@@ -67,6 +67,10 @@ test('parseManifest 校验', () => {
   assert.throws(() => parseManifest(JSON.stringify({ version: '0.2.0', files: { 'win-x64': { version: 'bad', url: 'u', sha256: sha('a') } } })), /version/);
 });
 
+test('parseManifest files 为数组被拒绝', () => {
+  assert.throws(() => parseManifest(JSON.stringify({ version: '0.2.0', files: [] })), /files/);
+});
+
 test('evaluateManifest 状态判定', () => {
   const mk = (files) => ({ version: '0.3.0', notes: 'n', files });
   const base = { currentVersion: '0.1.0', platform: 'win32', arch: 'x64' };
@@ -93,6 +97,30 @@ test('evaluateManifest 状态判定', () => {
   assert.equal(r.status, 'update-available', '更高版本重新提醒');
   // 当前版本非法
   r = evaluateManifest({ manifest: mk({ 'win-x64': { version: '0.2.0', url: 'u', sha256: sha('a') } }), currentVersion: 'bad', platform: 'win32', arch: 'x64' });
+  assert.equal(r.status, 'error');
+});
+
+test('evaluateManifest 垃圾 ignoredVersion 不误判为 ignored', () => {
+  const mk = (files) => ({ version: '0.3.0', notes: 'n', files });
+  const r = evaluateManifest({
+    manifest: mk({ 'win-x64': { version: '0.2.0', url: 'u', sha256: sha('a') } }),
+    currentVersion: '0.1.0', platform: 'win32', arch: 'x64', ignoredVersion: 'abc',
+  });
+  assert.equal(r.status, 'update-available', '非法忽略值不压制更新提示');
+});
+
+test('parseManifest 顶层 v 前缀与全大写 sha256 合法', () => {
+  const m = parseManifest(JSON.stringify({
+    version: 'v0.2.0', notes: '', files: { 'win-x64': { version: '0.2.0', url: 'u', sha256: 'A'.repeat(64) } },
+  }));
+  assert.equal(m.version, 'v0.2.0');
+});
+
+test('evaluateManifest 条目版本非法返回 error', () => {
+  const r = evaluateManifest({
+    manifest: { version: '0.2.0', notes: '', files: { 'win-x64': { version: 'bad', url: 'u', sha256: 'a'.repeat(64) } } },
+    currentVersion: '0.1.0', platform: 'win32', arch: 'x64',
+  });
   assert.equal(r.status, 'error');
 });
 

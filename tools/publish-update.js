@@ -76,6 +76,7 @@ function main() {
   }
   const sha256 = sha256File(src);
   const stage = path.join(__dirname, '..', 'dist', 'updates');
+  fs.rmSync(stage, { recursive: true, force: true }); // 清空上次暂存，防止残留文件被重复上传
   fs.mkdirSync(stage, { recursive: true });
 
   const run = (cmd, args) => execFileSync(cmd, args, { stdio: 'inherit' });
@@ -106,4 +107,9 @@ function main() {
   });
 }
 
-main();
+try {
+  main();
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
+}

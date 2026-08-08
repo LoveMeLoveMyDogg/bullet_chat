@@ -47,7 +47,8 @@ function parseManifest(text) {
   } catch {
     throw new Error('manifest 不是合法 JSON');
   }
-  if (!data || typeof data !== 'object' || typeof data.files !== 'object' || data.files === null) {
+  if (!data || typeof data !== 'object' || Array.isArray(data) ||
+      typeof data.files !== 'object' || data.files === null || Array.isArray(data.files)) {
     throw new Error('manifest 缺少 files');
   }
   if (parseVersion(data.version) === null) throw new Error('manifest 顶层 version 非法');
@@ -68,7 +69,8 @@ function evaluateManifest({ manifest, currentVersion, platform, arch, ignoredVer
   if (!entry) return { status: 'no-installer', latestVersion: manifest.version };
   if (parseVersion(entry.version) === null) return { status: 'error', message: '本平台版本号非法' };
   const notes = entry.notes || manifest.notes || '';
-  if (ignoredVersion && compareVersions(entry.version, ignoredVersion) <= 0) {
+  const cmp = compareVersions(entry.version, ignoredVersion);
+  if (ignoredVersion && cmp !== null && cmp <= 0) {
     return { status: 'ignored', latestVersion: entry.version, notes, entry };
   }
   if (compareVersions(entry.version, currentVersion) <= 0) {
@@ -81,7 +83,7 @@ function evaluateManifest({ manifest, currentVersion, platform, arch, ignoredVer
 function maxVersion(files) {
   let best = null;
   for (const entry of Object.values(files)) {
-    const v = parseVersion(entry.version);
+    const v = entry && parseVersion(entry.version);
     if (v && (!best || compareVersions(v.join('.'), best) > 0)) best = v.join('.');
   }
   return best || '0.0.0';
