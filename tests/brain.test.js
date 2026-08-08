@@ -810,3 +810,42 @@ test('最新优先：新回复到达时丢弃入队超过 30s 的旧弹幕', () 
   assert.equal(brain.buffer[1].text, '旧2');
   brain.stop();
 });
+
+test('优先发批：距上次飘出 ≥3s 时打断现有定时器立即发', async () => {
+  let fakeNow = 1000000;
+  const { brain, danmaku } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600; // 常规节奏极慢：模拟"定时器在跑"
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1;
+  brain.buffer.push({ text: '旧1', ts: fakeNow }, { text: '旧2', ts: fakeNow });
+  brain.scheduleEmit(); // 非优先：起 3600s 定时器（旧1 立即吐出）
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(danmaku.length, 1, '旧1 已出');
+  assert.ok(brain.emitTimer, '旧2 的节奏定时器在跑');
+  fakeNow += 5000; // 5 秒后：距上次飘出 ≥3s
+  brain.pushBuffer(['新1']);
+  brain.scheduleEmit(true); // 优先：应打断 3600s 定时器立即发
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(danmaku.length, 2, '新1 立即飘出（不等 3600s 节奏）');
+  assert.equal(danmaku[1].text, '新1', '最新回复先出');
+  brain.stop();
+});
+
+test('优先发批：距上次飘出 <3s 时保留现有定时器（防连发刷屏）', async () => {
+  let fakeNow = 1000000;
+  const { brain, danmaku } = makeEnv({ clock: () => fakeNow });
+  brain.config.danmaku.minIntervalSec = 3600;
+  brain.config.danmaku.burstMin = 1;
+  brain.config.danmaku.burstMax = 1;
+  brain.buffer.push({ text: '旧1', ts: fakeNow }, { text: '旧2', ts: fakeNow });
+  brain.scheduleEmit();
+  await new Promise((r) => setTimeout(r, 5));
+  assert.equal(danmaku.length, 1);
+  const timer = brain.emitTimer;
+  assert.ok(timer, '节奏定时器在跑');
+  fakeNow += 1000; // 1 秒后：距上次飘出 <3s
+  brain.pushBuffer(['新1']);
+  brain.scheduleEmit(true);
+  assert.equal(brain.emitTimer, timer, '现有定时器保留（不打断）');
+  brain.stop();
+});

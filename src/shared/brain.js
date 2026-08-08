@@ -18,6 +18,7 @@ const MAX_CONTENT_CHARS = 200;      // 内容片段最长字符数
 const BINARY_PROBE = 4096;          // 二进制检测采样长度
 const FILE_APP_TYPES = ['create', 'change', 'delete', 'rename', 'move']; // 文件操作类型：打前台应用戳
 const STALE_BUFFER_MS = 30000; // 弹幕缓冲年龄上限：新回复到达时丢弃入队超过 30s 的旧弹幕（积压旧闻不占屏幕）
+const PRIORITY_GAP_MS = 3000;  // 优先发批最短间隔：距上次飘出 ≥3s 时新回复立即发一批（防连发刷屏）
 
 // 读取文本文件内容片段（供 AI 生成"懂内容"的弹幕）。
 // 只读小文本文件：超限/二进制/读取失败一律返回空串（保持事件描述不因内容读取而失败）
@@ -254,8 +255,6 @@ class Brain {
     this.generateVision(batch);
   }
 
-  // 弹幕吐出：按 minIntervalSec 节奏一批批飘（每批 burstMin~burstMax 条随机，像直播间弹幕雨）。
-  // 批大小受同屏上限（maxConcurrent）与缓冲余量约束；补充后第一批立即出（不等满间隔）
   // 弹幕缓冲上限：防生成速率 > 消耗速率时积压（视觉通道高频场景每 10s +10 条 vs 消耗 2~3 条）。
   // 最新优先：新回复整批插队首（保持批内顺序），队尾方向即最旧；
   // 超限丢最旧保留最新（直播语义：弹幕是即时的，积压的旧弹幕没意义，最新弹幕才有价值）
@@ -274,10 +273,23 @@ class Brain {
     if (this.buffer.length > limit) this.buffer.splice(limit);
   }
 
-  scheduleEmit() {
-    if (this.emitTimer || this.state.paused) return;
+  // 弹幕吐出：按 minIntervalSec 节奏一批批飘（每批 burstMin~burstMax 条随机，像直播间弹幕雨）。
+  // priority（AI 新回复到达）：距上次飘出 ≥ PRIORITY_GAP_MS 时打断现有定时器立即发一批，
+  // 最新回复不等满节奏；< PRIORITY_GAP_MS（刚飘完）保留现有定时器防连发刷屏。
+  // 批大小受同屏上限（maxConcurrent）与缓冲余量约束；补充后第一批立即出（不等满间隔）
+  scheduleEmit(priority = false) {
+    if (this.emitTimer) {
+      if (priority && (this.lastEmitAt ? this.clock() - this.lastEmitAt >= PRIORITY_GAP_MS : true)) {
+        clearTimeout(this.emitTimer); // 优先：打断现有定时器，立即发最新回复
+        this.emitTimer = null;
+      } else {
+        return; // 非优先或刚飘过一批：保留现有定时器
+      }
+    }
+    if (this.state.paused) return;
     const sinceLast = this.lastEmitAt ? this.clock() - this.lastEmitAt : Infinity;
-    const delay = Math.max(0, this.config.danmaku.minIntervalSec * 1000 - sinceLast);
+    // priority 发批等待至多 PRIORITY_GAP_MS（间隔已满足则立即）；普通节奏补足 minIntervalSec
+    const delay = priority ? Math.max(0, PRIORITY_GAP_MS - sinceLast) : Math.max(0, this.config.danmaku.minIntervalSec * 1000 - sinceLast);
     this.emitTimer = setTimeout(() => {
       this.emitTimer = null;
       if (this.buffer.length === 0) {
@@ -329,7 +341,7 @@ class Brain {
       // 缓冲模式：解析结果全部进缓冲池，按节奏吐出（不立即全发）；超限丢最旧防积压
       if (lines.length) {
         this.pushBuffer(lines);
-        this.scheduleEmit();
+        this.scheduleEmit(true); // 优先发批：新回复立即（或 ≤3s 内）飘出，不等满节奏
       }
       if (this.state.error.text) this.clearError('text');
       this.emitStatus();
@@ -357,11 +369,11 @@ class Brain {
       const lines = parseDanmakuJson(raw, this.config.danmaku.replyCount || 10);
       this.lastVisionEmit = this.clock(); // 视觉调用限速标记（minIntervalVisionSec 闸门用）
       this.usageCounter?.record({ channel: 'vision', inputChars: 0, systemChars: system.length, outputChars: raw.length, parsedCount: lines.length, imageKb: dataUrlKb(entry.imageDataUrl) });
-      // 视觉弹幕也进缓冲：飘出节奏与文字统一（burstMin/burstMax + minIntervalSec 全局生效），
+      // 视觉弹幕也进缓冲，最新优先插队：飘出节奏与文字统一（burstMin/burstMax + minIntervalSec 全局生效），
       // 超限丢最旧防积压（旧实现一次回复全部瞬间飘出，且高频画面变化时 buffer 无限增长）
       if (lines.length) {
         this.pushBuffer(lines);
-        this.scheduleEmit();
+        this.scheduleEmit(true); // 优先发批：新回复立即（或 ≤3s 内）飘出，不等满节奏
       }
       if (this.state.error.vision) this.clearError('vision');
       this.emitStatus();
