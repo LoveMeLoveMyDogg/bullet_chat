@@ -1,6 +1,6 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
-const { parseMacFront, parseBundleId, parseWinLine, parseInputLine, HUMAN_INPUT_MS, AppWatcher } = require('../src/main/appWatcher');
+const { parseMacFront, parseBundleId, parseWinLine, parseInputLine, HUMAN_INPUT_MS, AppWatcher, MAC_INPUT_SCRIPT } = require('../src/main/appWatcher');
 
 test('parseMacFront 解析 lsappinfo front 输出', () => {
   assert.equal(parseMacFront('frontASN = ASN:0x0-0x1234:com.microsoft.VSCode'), 'com.microsoft.VSCode');
@@ -162,4 +162,37 @@ test('Windows 探测 spawn 隐藏窗口（不弹 PowerShell 黑窗）+ stdout �
   assert.equal(events[0].appKey, 'code');
   assert.deepEqual(fw.getHumanActivity(), { active: true, idleMs: 3000 }, '输入活动行被解析并缓存');
   fw.stop();
+});
+
+test('macOS 输入活动长驻通道（osascript JXA）：I| 行解析 + 门控信号 + 退出清理', async () => {
+  const { EventEmitter } = require('node:events');
+  const { Readable } = require('node:stream');
+  const spawned = [];
+  let killed = 0;
+  const mockSpawn = (cmd, args, opts) => {
+    spawned.push({ cmd, args, opts });
+    const child = new EventEmitter();
+    const out = new Readable({ read() {} });
+    out.push('I|8000\n');   // 8 秒前有输入（阈值内 → 人为活动）
+    out.push('I|25000\n');  // 后到的行覆盖：25 秒无输入 → 非人为活动
+    out.push(null);
+    child.stdout = out;
+    child.kill = () => { killed++; };
+    return child;
+  };
+  const fw = new AppWatcher({
+    pollMs: 3600000, clock: () => 0, platform: 'darwin',
+    exec: (_cmd, _args, cb) => cb(null, 'frontASN = ASN:0x0-0x1234:com.microsoft.VSCode'),
+    spawnImpl: mockSpawn,
+    onEvent: () => {}, onStay: () => {}, stayMinutes: 20,
+  });
+  fw.start(); // start 即启动输入长驻进程（输入通道无 poll 时机）
+  await new Promise((r) => setTimeout(r, 20));
+  assert.equal(spawned.length, 1, 'osascript 长驻只启动一次');
+  assert.equal(spawned[0].cmd, 'osascript');
+  assert.ok(spawned[0].args.includes('-l') && spawned[0].args.includes('JavaScript'), 'JXA 模式');
+  assert.ok(MAC_INPUT_SCRIPT.includes('CGEventSourceSecondsSinceLastEventType'), '脚本用 CoreGraphics 空闲时间 API');
+  assert.deepEqual(fw.getHumanActivity(), { active: false, idleMs: 25000 }, '最近一行覆盖（25s > 10s 阈值）');
+  fw.stop();
+  assert.equal(killed, 1, 'stop 清理长驻进程');
 });

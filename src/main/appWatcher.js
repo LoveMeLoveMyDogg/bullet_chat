@@ -79,6 +79,24 @@ while ($true) {
   Start-Sleep -Milliseconds ${POLL_MS}
 }`;
 
+// macOS 长驻脚本（osascript JXA）：stdout 逐行输出 "I|距最后键盘/鼠标输入毫秒"。
+// CGEventSourceSecondsSinceLastEventType 是 GetLastInputInfo 的 macOS 等价物：
+// CoreGraphics 读 HID 空闲状态（不监听事件），无需辅助功能/输入监控权限；
+// osascript 系统自带，零依赖。长驻循环与 Windows PowerShell 通道对称（delay() 是 JXA 内置全局函数，秒）。
+// 坑：JXA 的 console.log 输出到 stderr，必须用 NSFileHandle 显式写 stdout（readline 只接 stdout）
+const MAC_INPUT_SCRIPT = `
+ObjC.import('CoreGraphics');
+ObjC.import('Foundation');
+const out = $.NSFileHandle.fileHandleWithStandardOutput;
+function emit() {
+  const s = $.CGEventSourceSecondsSinceLastEventType($.kCGEventSourceStateHIDSystemState, $.kCGAnyInputEventType);
+  out.writeData($.NSString.alloc.initWithUTF8String('I|' + Math.round(s * 1000) + '\\n').dataUsingEncoding($.NSUTF8StringEncoding));
+}
+while (true) {
+  emit();
+  delay(${POLL_MS} / 1000);
+}`;
+
 class AppWatcher {
   constructor({ pollMs = POLL_MS, clock = Date.now, platform = process.platform, exec = execFile, spawnImpl = spawn, onEvent, onStay, onError, stayMinutes = 20, aliases = {} }) {
     this.pollMs = pollMs;
@@ -94,11 +112,14 @@ class AppWatcher {
     this.current = null; // { appKey, since }
     this.timer = null;
     this.winProc = null;
-    this.lastIdleMs = null; // 距最后键盘/鼠标输入的毫秒（PowerShell 轮询缓存；null=未就绪）
+    this.macInputProc = null; // macOS 输入活动长驻进程（osascript JXA）；win32 的输入行与前台行同走 winProc
+    this.lastIdleMs = null; // 距最后键盘/鼠标输入的毫秒（长驻进程轮询缓存；null=未就绪）
   }
 
   start() {
     if (this.timer) return;
+    // macOS 输入活动信号源：start 即启动长驻进程（输入通道没有 poll 时机，不能像 winProc 那样 lazy）
+    if (this.platform === 'darwin') this.ensureInputProc();
     this.poll();
     this.timer = setInterval(() => this.poll(), this.pollMs);
     this.timer.unref?.();
@@ -109,6 +130,25 @@ class AppWatcher {
     this.timer = null;
     this.winProc?.kill();
     this.winProc = null;
+    this.macInputProc?.kill();
+    this.macInputProc = null;
+  }
+
+  // macOS 人为活动信号源：长驻 osascript（JXA）逐行输出 "I|<距最后输入毫秒>"。
+  // spawn 'error' 后 Node 不一定再触发 'exit'，置空防轮询静默死掉（与 winProc 对称）；
+  // 首行输出前 lastIdleMs=null → getHumanActivity 返回 null，门控放行（宽松：不误挡启动后的立即操作）
+  ensureInputProc() {
+    if (this.macInputProc) return;
+    this.macInputProc = this.spawnImpl('osascript', ['-l', 'JavaScript', '-e', MAC_INPUT_SCRIPT], { stdio: ['ignore', 'pipe', 'ignore'] });
+    this.macInputProc.on('error', (err) => {
+      this.macInputProc = null;
+      this.onError?.(new Error(`osascript 启动失败：${err.message}`));
+    });
+    this.macInputProc.on('exit', () => { this.macInputProc = null; });
+    readline.createInterface({ input: this.macInputProc.stdout }).on('line', (line) => {
+      const idle = parseInputLine(line);
+      if (idle !== null) this.lastIdleMs = idle;
+    });
   }
 
   getCurrent() {
@@ -116,7 +156,7 @@ class AppWatcher {
   }
 
   // 人为活动信号：距最后键盘/鼠标输入是否在阈值内（人为文件操作门控用）。
-  // lastIdleMs 为 null（PowerShell 首轮输出前）→ 返回 null，调用方不拦截（宽松：避免误挡用户启动后的立即操作）
+  // lastIdleMs 为 null（长驻进程首轮输出前）→ 返回 null，调用方不拦截（宽松：避免误挡用户启动后的立即操作）
   getHumanActivity() {
     if (this.lastIdleMs === null) return null;
     return { active: this.lastIdleMs <= HUMAN_INPUT_MS, idleMs: this.lastIdleMs };
@@ -186,4 +226,4 @@ class AppWatcher {
   }
 }
 
-module.exports = { POLL_MS, HUMAN_INPUT_MS, parseMacFront, parseBundleId, parseWinLine, parseInputLine, AppWatcher };
+module.exports = { POLL_MS, HUMAN_INPUT_MS, parseMacFront, parseBundleId, parseWinLine, parseInputLine, AppWatcher, MAC_INPUT_SCRIPT };
