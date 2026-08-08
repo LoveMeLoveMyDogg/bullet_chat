@@ -115,8 +115,8 @@ app ready 后延迟 5s 静默检查一次（等窗口/托盘就绪）。发现�
 | 部署方式 | 纯静态文件 + Nginx，**无 Node 后端、无 PM2**（与 SOP 标准项目的差异） |
 | 宝塔登记 | 按 SOP 第 9/10 节：备份 site.db → 查重 → 插 sites/domain → 补配套文件 |
 
-- DNS：`updates.zhipengcoding.com` A → `139.196.204.73` 已在阿里云控制台添加，Google DoH 验证生效（2026-08-08）
-- SSH：`ssh -i /Users/szp/.ssh/calories-server-key.pem root@139.196.204.73` 连通正常
+- DNS：`updates.zhipengcoding.com` A → `your-server-ip` 已在阿里云控制台添加，Google DoH 验证生效（2026-08-08）
+- SSH：`ssh -i /path/to/your-ssh-key.pem root@your-server-ip` 连通正常
 - 服务器无 dig 命令，验证用 curl
 
 Nginx 配置要点（静态站点）：根目录指向 DEPLOY_PATH，SSL 用现有证书，开启 `location /` 静态文件服务；`version.json` 加 `Cache-Control: no-cache`（防客户端 HTTP 缓存读到旧版本）；`.conf` 写入 `/www/server/panel/vhost/nginx/updates.zhipengcoding.com.conf`，含 SOP 9.6 的 well-known/extension include 与证书配置。

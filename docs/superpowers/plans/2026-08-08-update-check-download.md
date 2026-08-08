@@ -1083,9 +1083,9 @@ deploy.env
 
 ```env
 # 复制为 deploy.env 并填写真实值（deploy.env 不入库）
-DEPLOY_HOST=139.196.204.73
+DEPLOY_HOST=your-server-ip
 DEPLOY_USER=root
-DEPLOY_SSH_KEY=/Users/szp/.ssh/calories-server-key.pem
+DEPLOY_SSH_KEY=/path/to/your-ssh-key.pem
 DEPLOY_PATH=/www/wwwroot/updates.zhipengcoding.com
 ```
 
@@ -1255,20 +1255,20 @@ git commit -m "feat: 发布脚本单平台上传（sha256/manifest 合并/rsync-
 - 服务器（SSH 操作，按 `~/Documents/个人/baota-subdomain-deployment-sop.md` 执行）：Nginx 静态站点 + 泛域名证书 + 宝塔 site.db 登记
 
 **Interfaces:**
-- Consumes: 服务器 139.196.204.73（root + `/Users/szp/.ssh/calories-server-key.pem`）、已生效 DNS（`updates.zhipengcoding.com` A → 139.196.204.73，2026-08-08 已验证）
+- Consumes: 服务器 your-server-ip（root + `/path/to/your-ssh-key.pem`）、已生效 DNS（`updates.zhipengcoding.com` A → your-server-ip，2026-08-08 已验证）
 - Produces: `https://updates.zhipengcoding.com/` 静态站点（version.json 与安装包根目录直放）、宝塔面板可见站点
 
 - [ ] **Step 1: 检查 SSH 连通与现有环境**
 
 ```bash
-ssh -i /Users/szp/.ssh/calories-server-key.pem -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new root@139.196.204.73 "ls /www/server/panel/vhost/cert/zhipengcoding.com/ && ls /www/wwwroot/ | head -20"
+ssh -i /path/to/your-ssh-key.pem -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new root@your-server-ip "ls /www/server/panel/vhost/cert/zhipengcoding.com/ && ls /www/wwwroot/ | head -20"
 ```
 Expected: 列出证书目录文件（记录实际证书文件名，Step 2 用）与现有站点目录
 
 - [ ] **Step 2: 创建目录 + 写 Nginx 配置**
 
 ```bash
-ssh -i /Users/szp/.ssh/calories-server-key.pem root@139.196.204.73 "mkdir -p /www/wwwroot/updates.zhipengcoding.com /www/server/panel/vhost/nginx/well-known/updates.zhipengcoding.com.conf.d /www/server/panel/vhost/nginx/extension/updates.zhipengcoding.com"
+ssh -i /path/to/your-ssh-key.pem root@your-server-ip "mkdir -p /www/wwwroot/updates.zhipengcoding.com /www/server/panel/vhost/nginx/well-known/updates.zhipengcoding.com.conf.d /www/server/panel/vhost/nginx/extension/updates.zhipengcoding.com"
 ```
 
 用 heredoc 写入 `/www/server/panel/vhost/nginx/updates.zhipengcoding.com.conf`（证书文件名以 Step 1 实际 ls 结果为准，宝塔泛域名证书通常是 `fullchain.pem` + `privkey.pem`）：
@@ -1308,7 +1308,7 @@ server {
 - [ ] **Step 3: 宝塔登记（先备份 site.db，查重后插入）**
 
 ```bash
-ssh -i /Users/szp/.ssh/calories-server-key.pem root@139.196.204.73 "cp /www/server/panel/data/db/site.db /www/server/panel/data/db/site.db.bak.$(date +%Y%m%d%H%M%S) && sqlite3 /www/server/panel/data/db/site.db '.tables'"
+ssh -i /path/to/your-ssh-key.pem root@your-server-ip "cp /www/server/panel/data/db/site.db /www/server/panel/data/db/site.db.bak.$(date +%Y%m%d%H%M%S) && sqlite3 /www/server/panel/data/db/site.db '.tables'"
 ```
 
 Expected: 备份成功；列出表（确认 `sites` / `domain` 存在）。若 sqlite3 命令缺失：`yum install -y sqlite` 或 `apt install -y sqlite3` 后重试。
@@ -1316,7 +1316,7 @@ Expected: 备份成功；列出表（确认 `sites` / `domain` 存在）。若 s
 先查后插（避免重复登记；SQL 里的表结构以 `.schema sites` / `.schema domain` 实际输出为准，字段名按 SOP 第 9.4 节）:
 
 ```bash
-ssh -i /Users/szp/.ssh/calories-server-key.pem root@139.196.204.73 "sqlite3 /www/server/panel/data/db/site.db \"SELECT id FROM sites WHERE name='updates.zhipengcoding.com'\""
+ssh -i /path/to/your-ssh-key.pem root@your-server-ip "sqlite3 /www/server/panel/data/db/site.db \"SELECT id FROM sites WHERE name='updates.zhipengcoding.com'\""
 ```
 
 - 无输出 → 插入 sites（`INSERT INTO sites (name, path, status, ps, addtime, project_type) VALUES ('updates.zhipengcoding.com', '/www/wwwroot/updates.zhipengcoding.com', '1', '更新下载站', strftime('%s','now'), '0')`，字段名以 .schema 为准）
