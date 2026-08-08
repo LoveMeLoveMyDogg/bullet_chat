@@ -521,6 +521,7 @@ test('事件临过期（≥60s）时缓冲充足也强制补充（防时间窗�
   brain.config.danmaku.batchIntervalMs = 0;
   brain.config.danmaku.maxEventAgeSec = 120;
   brain.buffer.push('占位1', '占位2', '占位3'); // 缓冲充足（> REFILL_THRESHOLD=2）
+  brain.lastEmitAt = Date.now(); // 阻止首条立即吐出（lastEmitAt 为空时首次 emit delay=0，会以 setTimeout 链迅速抽干缓冲，破坏"缓冲充足"前提；Windows 定时器粒度 ~15ms 恰好撑过断言，macOS ~1ms 就挂）
   // 直接构造队列：70 秒前入队的事件（pushEntry 会覆盖 ts，绕过它模拟积压）
   brain.queue.push(entry('create', { ts: Date.now() - 70000 }));
   brain.maybeRefill();
