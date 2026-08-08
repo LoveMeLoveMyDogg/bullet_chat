@@ -3,3 +3,4 @@ dist/
 deploy.env
 .zcode/
 .DS_Store
+.playwright-mcp/
