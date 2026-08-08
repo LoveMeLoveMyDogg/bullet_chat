@@ -1,6 +1,6 @@
 {
   "name": "bullet-chat",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "桌面弹幕直播：监控你的文件操作，AI 观众发弹幕吐槽",
   "author": "szp",
   "main": "src/main/main.js",
