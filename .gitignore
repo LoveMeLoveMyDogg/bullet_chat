@@ -2,3 +2,4 @@ node_modules/
 dist/
 deploy.env
 .zcode/
+.DS_Store
