@@ -29,7 +29,8 @@
     "win": {
       "target": [
         "nsis"
-      ]
+      ],
+      "artifactName": "${productName}-${version}-win-${arch}.${ext}"
     },
     "nsis": {
       "oneClick": false,
@@ -44,6 +45,7 @@
       "target": [
         "dmg"
       ],
+      "artifactName": "${productName}-${version}-mac-${arch}.${ext}",
       "identity": null,
       "category": "public.app-category.utilities"
     }
