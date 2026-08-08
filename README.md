@@ -43,12 +43,13 @@ $env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-bu
 
 应用内「检查更新」读取 `https://updates.zhipengcoding.com/version.json`（阿里云服务器 Nginx 静态站点，复用泛域名证书）。
 
-发布步骤（各平台在自己电脑上操作）：
+发布步骤（SSH 凭据只放在 Mac，所有上传都在 Mac 上执行；Windows 只负责打包）：
 
-1. 升级版本号：`npm version patch`（或手改 package.json）
-2. 构建：Windows 包 `npm run build:win`；macOS 包 `npm run build:mac`（Intel 包加 `--x64`）
-3. 首次使用先复制 `deploy.env.example` 为 `deploy.env` 并填写 SSH 参数
-4. 发布：`node tools/publish-update.js --platform win-x64 --notes "更新说明"`（mac 用 `mac-arm64`/`mac-x64`）
+1. 升级版本号：`npm version patch`（或手改 package.json）——**发布前 Mac 与 Windows 的 package.json 版本必须一致**（exe/dmg 文件名带版本号，脚本按本地 package.json 找产物）
+2. 构建：Windows 上 `npm run build:win`（产出 `dist/BulletChat-<版本>-win-x64.exe`）；macOS 上 `npm run build:mac`（Intel 包加 `--x64`）
+3. Windows 打好的 exe 传到 Mac，放进项目 `dist/` 目录（微信/网盘/共享盘均可）
+4. 首次使用先复制 `deploy.env.example` 为 `deploy.env` 并填写 SSH 参数（只需在 Mac 上配）
+5. 发布：`node tools/publish-update.js --platform win-x64 --notes "更新说明"`（mac 用 `mac-arm64`/`mac-x64`）——发布脚本与平台无关，Mac 上可直接发布任意平台的包
 
 脚本只更新当前平台条目、保留另一平台条目；自动计算 SHA256、上传安装包 + version.json 并修正属主。用户在应用内「检查更新」→ 下载完整安装包 → 手动安装覆盖旧版。
 
