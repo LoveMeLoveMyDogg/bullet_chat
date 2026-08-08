@@ -5,7 +5,7 @@
 
 ## 目标
 
-设置页"日志（发送给 AI 的请求）"面板目前只有手动"刷新"按钮。加自动刷新：日志随 AI 请求实时滚动更新，不用手动点；新请求可视高亮。性能已实测确认无碍——RequestLogger 是内存 ring（`MAX_MEMORY=100` 条），一次 IPC ≤100 条目（~250KB JSON）毫秒级，5s 轮询 CPU 开销可忽略（<0.1%）。
+设置页"日志（发送给 AI 的请求）"面板目前只有手动"刷新"按钮。加自动刷新：日志随 AI 请求实时滚动更新，不用手动点；新请求可视高亮。性能已实测确认无碍——RequestLogger 是内存 ring（`MAX_MEMORY=100` 条），一次 IPC ≤50 条目（~150KB JSON，`getLogs(limit=50)` 默认上限；ring 存量 100 但视图只取 50）毫秒级，5s 轮询 CPU 开销可忽略（<0.1%）。
 
 ## 变更
 
@@ -18,7 +18,7 @@
 
 ### S4-2 新请求高亮（settings.js + settings.css）
 
-- 渲染时维护 `seenLogKeys`（Set，条目 key = `ts|channel|error`），**只保留当前渲染的 ≤100 条**（防无限增长）。
+- 渲染时维护 `seenLogKeys`（Set，条目 key = `ts|channel|error`），**只保留当前渲染的 ≤50 条**（防无限增长）。
 - 新出现的条目（key 不在上次集合中）加 `req-new` 类；**首屏渲染不高亮**（首开页面所有条目都算"新"会全闪）。
 - CSS：`.req-item.req-new { animation: req-flash 2s ease-out; }` + `@keyframes req-flash`（背景白雾淡出）。
 

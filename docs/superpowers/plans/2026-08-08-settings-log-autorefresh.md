@@ -4,7 +4,7 @@
 
 **Goal:** 设置页请求日志面板每 5s 自动刷新（仅窗口可见时轮询），新请求高亮，无变化不重建 DOM，滚动位置保持。
 
-**Architecture:** 纯渲染层改动（`src/renderer/settings/settings.js` + `settings.css`）。`setInterval` 5s + `document.visibilityState` 守卫触发 `renderRequestLogs`；函数内加"签名比对跳过 + 滚动位置恢复 + 新条目 key 集合高亮"；CSS 加 `req-flash` 动画。主进程零改动（`getRequestLogs` IPC 已存在，内存 ring ≤100 条，5s 轮询开销可忽略——已实测确认）。
+**Architecture:** 纯渲染层改动（`src/renderer/settings/settings.js` + `settings.css`）。`setInterval` 5s + `document.visibilityState` 守卫触发 `renderRequestLogs`；函数内加"签名比对跳过 + 滚动位置恢复 + 新条目 key 集合高亮"；CSS 加 `req-flash` 动画。主进程零改动（`getRequestLogs` IPC 已存在，内存 ring 100 条、视图 `getLogs(limit=50)` 默认 50 条，5s 轮询开销可忽略——已实测确认）。
 
 **Tech Stack:** 无新依赖；渲染层无单测（项目惯例 CDP 实机验证）。
 
@@ -12,7 +12,7 @@
 
 - 只改 `src/renderer/settings/settings.js` 与 `src/renderer/settings/settings.css` 两个文件（主进程/预加载/HTML 均不动）
 - 间隔 5s（常量 `LOG_REFRESH_MS = 5000`）、仅 `document.visibilityState === 'visible'` 时拉取
-- 新条目 key = `` `${l.ts}|${l.channel}|${l.error || ''}` ``，key 集合只保留当前渲染的条目（≤100，防无限增长）
+- 新条目 key = `` `${l.ts}|${l.channel}|${l.error || ''}` ``，key 集合只保留当前渲染的条目（≤50，防无限增长）
 - 首屏渲染不高亮；手动"刷新"按钮保留，与自动刷新共用同一渲染函数
 - 签名 = `logs.length + '|' + 最新条目 ts`，相同则跳过重建
 - 测试命令：`npm test`（= `node --test`，基线 187，本改动无测试文件变更应保持 187）
@@ -27,7 +27,7 @@
 - Test: 无单测（渲染层惯例，Task 2 CDP 实测）
 
 **Interfaces:**
-- Consumes: `window.settings.getRequestLogs()`（现有 IPC，返回 ≤100 条 `{ts, channel, input, reply, parsedCount, error, paths, image}` 数组，ring 序 = 旧→新）
+- Consumes: `window.settings.getRequestLogs()`（现有 IPC，返回 ≤50 条（`getLogs(limit=50)` 默认；ring 存量 100） `{ts, channel, input, reply, parsedCount, error, paths, image}` 数组，ring 序 = 旧→新）
 - Produces: `renderRequestLogs()`（签名跳过 + 滚动保持 + 新条目 `req-new` 类）；模块级 `LOG_REFRESH_MS = 5000`、`lastLogSignature`、`seenLogKeys`（Set）、`firstRender`（bool）；`setInterval` 5s 可见才轮询
 
 - [ ] **Step 1: 重构 renderRequestLogs（settings.js:261-299 区域）**
@@ -37,7 +37,7 @@
 ```js
 // 请求日志：发送给文字/视觉模型的内容、回复与截图（5s 自动刷新，无变化不重建）
 let lastLogSignature = '';   // 上次渲染的日志签名（数量+最新条目 ts），未变化跳过重建
-let seenLogKeys = new Set(); // 已渲染条目 key（ts|channel|error），只保留当前 ≤100 条
+let seenLogKeys = new Set(); // 已渲染条目 key（ts|channel|error），只保留当前 ≤50 条
 let firstRender = true;      // 首屏不高亮（开页时全部算"新"会全闪）
 
 async function renderRequestLogs() {

@@ -267,6 +267,7 @@ async function renderRequestLogs() {
   const sig = logs.length + '|' + (logs.length ? logs[logs.length - 1].ts : '');
   if (sig === lastLogSignature) return; // 无新请求：跳过（避免每 5s 重建 DOM）
   lastLogSignature = sig;
+  const first = firstRender; // 本次渲染是否首屏：循环内求值用快照（若先置 false 则 isNew 恒真，开页全闪）
   firstRender = false; // 首次完整渲染（无论空或非空）后不再抑制高亮
   const box = $('req-log');
   const prevScroll = box.scrollTop; // 重建前保存滚动位置（自动刷新时阅读旧日志不跳）
@@ -279,7 +280,7 @@ async function renderRequestLogs() {
   for (const l of [...logs].reverse()) {
     const key = `${l.ts}|${l.channel}|${l.error || ''}`;
     currentKeys.add(key);
-    const isNew = !firstRender && !seenLogKeys.has(key);
+    const isNew = !first && !seenLogKeys.has(key);
     const row = document.createElement('div');
     row.className = 'req-item ' + (l.error ? 'req-err ' : '') + (isNew ? 'req-new' : '');
     const head = document.createElement('div');
