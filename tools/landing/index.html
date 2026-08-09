@@ -163,9 +163,18 @@
     background: rgba(255, 255, 255, 0.1); padding: 1px 7px; border-radius: 5px;
     font-family: "SF Mono", Consolas, monospace; font-size: 13px; color: #bde3ff;
   }
+  details .body a { color: var(--accent2); text-decoration: none; }
+  details .body a:hover { text-decoration: underline; }
+  .zen-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+  .zen-table td, .zen-table th { padding: 6px 10px; border: 1px solid var(--glass-border); text-align: left; font-size: 13px; }
+  .zen-table th { color: var(--text); background: rgba(255, 255, 255, 0.05); font-weight: 600; }
+  .zen-table td:first-child { white-space: nowrap; }
+  .zen-table .warn { color: #ffd27d; font-size: 12px; }
 
   /* 页脚 */
   footer { margin-top: 40px; text-align: center; font-size: 12px; color: rgba(238, 240, 255, 0.4); }
+  footer a { color: rgba(124, 108, 255, 0.85); text-decoration: none; margin: 0 6px; }
+  footer a:hover { text-decoration: underline; }
 
   /* 加载中/暂无状态 */
   .muted { color: var(--text-dim); font-size: 14px; }
@@ -239,7 +248,29 @@
     </details>
   </section>
 
-  <footer>© 2026 zhipengcoding.com · BulletChat</footer>
+  <!-- 免费 API 教程 -->
+  <section class="guide">
+    <details open>
+      <summary>🎁 免费 API Key：OpenCode Zen 白嫖教程</summary>
+      <div class="body">
+        没有 API Key 也能玩（设置里勾选「本地模式」用内置弹幕模板），但想让 AI 真的吐槽你的操作，最省事的路子是注册
+        <a href="https://opencode.ai" target="_blank" rel="noopener">OpenCode Zen</a> —— 官方提供多个<b>完全免费</b>的模型
+        （DeepSeek V4 Flash、MiMo-V2.5 等），一张 <code>sk-</code> 密钥同时搞定文字弹幕和屏幕识别：<br /><br />
+        1. 打开 <a href="https://opencode.ai" target="_blank" rel="noopener">opencode.ai</a>，用 GitHub 账号注册登录<br />
+        2. 进入 <code>Zen → API 密钥</code>，点右上角「<b>创建 API 密钥</b>」，创建后立即复制（密钥只完整显示一次）<br />
+        3. 打开 BulletChat 设置，两个模型都填这套配置，API Key 填刚复制的密钥：<br /><br />
+        <table class="zen-table">
+          <tr><th>模型</th><th>接口地址</th><th>模型名</th></tr>
+          <tr><td>文字模型（文件弹幕）</td><td><code>https://opencode.ai/zen/v1</code></td><td><code>deepseek-v4-flash-free</code></td></tr>
+          <tr><td>视觉模型（屏幕弹幕）</td><td><code>https://opencode.ai/zen/v1</code></td><td><code>mimo-v2.5-free</code></td></tr>
+        </table><br />
+        4. 分别点「测试连接」，通过后保存，弹幕开飘 🎉<br /><br />
+        <span class="warn">⚠️ 注意：免费模型有速率限制，短时间请求过多会返回 <code>Rate limit exceeded</code>，稍等片刻重试即可；免费额度官方随时可能调整，白嫖趁早～</span>
+      </div>
+    </details>
+  </section>
+
+  <footer>© 2026 zhipengcoding.com · <a href="https://github.com/LoveMeLoveMyDogg/bullet_chat" target="_blank" rel="noopener">GitHub 源码</a> · BulletChat</footer>
 </div>
 
 <script>
