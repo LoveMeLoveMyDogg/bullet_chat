@@ -44,7 +44,7 @@ BulletChat 把你的电脑变成一个 24 小时直播间：
 
 ### ⚡ 弹幕雨，不冷场
 
-一次 AI 回复生成 8~10 条弹幕，按 2~8 条随机批量飘出，弹幕雨一样接连不断；最新生成的弹幕**优先上屏**，不排队、不积压，像真实直播间一样热闹。
+一次文字回复生成 8 到 10 条弹幕，按 2 到 8 条随机分批飘出，弹幕雨一样接连不断；最新生成的弹幕**优先上屏**，不排队、不积压，像真实直播间一样热闹。
 
 ### 🔔 场景播报
 
@@ -98,12 +98,6 @@ macOS 首次使用屏幕识别，需在 **系统设置 → 隐私与安全性 �
 
 标准 OpenAI `chat/completions` 端点直接填地址即可；仅支持 Responses API 的端点（如火山方舟 coding plan，填 `https://ark.cn-beijing.volces.com/api/coding/v3`）会自动探测并回退兼容。主流服务商（DeepSeek、OpenCode Zen、火山方舟、OpenAI 中转等）开箱即用。
 
-## 隐私
-
-- API Key 仅存本机（系统加密），只发送给你填写的接口地址
-- 屏幕识别会把截图发送给你配置的视觉模型 API；可用「隐私遮罩」涂黑敏感区域
-- 可随时在托盘暂停屏幕识别或整个弹幕
-
 ## 错误处理与已知问题
 
 出错即提示：系统通知 + 设置页状态条 + 日志（`userData/logs/app.log`），弹幕暂停，60 秒自动重试。
@@ -153,17 +147,3 @@ $env:ELECTRON_BUILDER_BINARIES_MIRROR="https://npmmirror.com/mirrors/electron-bu
 - macOS：首次打开需右键应用 →「打开」；屏幕识别需重新授权（系统设置 → 隐私与安全性 → 屏幕录制，权限按应用独立）
 
 应用图标：默认是 `tools/generate-icon.js` 生成的占位图（`assets/icon.png`），想换图标直接替换该文件后重新构建即可。
-
-### 发布新版（检查更新）
-
-应用内「检查更新」读取 `https://updates.zhipengcoding.com/version.json`（阿里云服务器 Nginx 静态站点，复用泛域名证书）。
-
-发布步骤（SSH 凭据只放在 Mac，所有上传都在 Mac 上执行；Windows 只负责打包）：
-
-1. 升级版本号：`npm version patch`（或手改 package.json）——**发布前 Mac 与 Windows 的 package.json 版本必须一致**（exe/dmg 文件名带版本号，脚本按本地 package.json 找产物）
-2. 构建：Windows 上 `npm run build:win`（产出 `dist/BulletChat-<版本>-win-x64.exe`）；macOS 上 `npm run build:mac`（Intel 包加 `--x64`）
-3. Windows 打好的 exe 传到 Mac，放进项目 `dist/` 目录（微信/网盘/共享盘均可）
-4. 首次使用先复制 `deploy.env.example` 为 `deploy.env` 并填写 SSH 参数（只需在 Mac 上配）
-5. 发布：`node tools/publish-update.js --platform win-x64 --notes "更新说明"`（mac 用 `mac-arm64`/`mac-x64`）——发布脚本与平台无关，Mac 上可直接发布任意平台的包
-
-脚本只更新当前平台条目、保留另一平台条目；自动计算 SHA256、上传安装包 + version.json 并修正属主。用户在应用内「检查更新」→ 下载完整安装包 → 手动安装覆盖旧版。
